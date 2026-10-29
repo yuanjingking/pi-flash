@@ -101,6 +101,7 @@ actions!(
         MaximizeFileTree,
         ViewLeft,
         ViewRight,
+        ToggleTerminal,
         OpenFileSearch,
         OpenProjectSearch,
         PreviewUp,
@@ -303,6 +304,9 @@ fn main() {
                 KeyBinding::new("ctrl-left", ViewLeft, Some("Input")),
                 KeyBinding::new("ctrl-right", ViewRight, Some("ContentTabs")),
                 KeyBinding::new("ctrl-right", ViewRight, Some("Input")),
+                // 终端面板开关（Ctrl+`，Zed workspace::ToggleBottomDock 同位；
+                // 无上下文 = 终端持焦时也能按它收起自己）
+                KeyBinding::new("ctrl-`", ToggleTerminal, None),
                 // 082 三期 md 预览滚动（MdPreview 上下文 = 预览容器持焦时
                 // 生效；组件未占这些键——Input/List 上下文的同名键互不干扰）
                 KeyBinding::new("up", PreviewUp, Some("MdPreview")),

@@ -183,14 +183,14 @@ impl Render for Chat {
         {
             // 040-1：市场搜索框持焦不回收（同文件编辑器白名单）——render
             // 每帧仲裁会把焦点抢回 composer，市场页搜索框点进去打不进字
-        } else if !(self.layout.content_view == crate::ContentView::Term
-            && self
-                .shown_terminal_focus()
-                .is_some_and(|h| h.is_focused(window)))
+        } else if !self
+            .shown_terminal_focus()
+            .is_some_and(|h| h.is_focused(window))
         {
-            // 终端持焦白名单只在终端视图内生效：切回 chat/文件后终端元素
-            // 已卸载，但 gpui 的 focus handle 不会随卸载自动 blur，残留持焦
-            // 会把每帧的焦点回收永久挡在 composer 之外（打字无处可去）
+            // 终端持焦白名单只在**面板展开**时生效（`shown_terminal_focus`
+            // 收起即 None）：面板收起后终端元素已卸载，但 gpui 的 focus
+            // handle 不会随卸载自动 blur，残留持焦会把每帧的焦点回收永久
+            // 挡在 composer 之外（打字无处可去）
             //
             // 文件树行内编辑（Zed project_panel `filename_editor`）：编辑
             // 存续期它就是焦点所有者——Zed 里这条由面板列表 `track_focus`
@@ -472,7 +472,7 @@ impl Render for Chat {
             .relative()
             .flex()
             // slp 宽度拖拽（resizer 按下时在此跟踪）
-            .on_mouse_move(move |ev: &gpui::MouseMoveEvent, _, cx| {
+            .on_mouse_move(move |ev: &gpui::MouseMoveEvent, window, cx| {
                 let _ = weak_for_body.update(cx, |c, cx| {
                     if let Some((start_x, start_w)) = c.layout.slp_drag {
                         c.layout.slp_w =
@@ -482,6 +482,16 @@ impl Render for Chat {
                     // 020-1 子面板分隔线拖拽：按 dock 实测 bounds 把窗口 y
                     // 换算成占比，钳到两控制栏之间（上推/下拉到底 = 对面只剩
                     // 控制栏）；拖拽即退出两侧最小态
+                    // 终端面板高度拖拽（上沿命中带按下时在此跟踪）：向上 = 变高。
+                    // 上限取视口 − 240（给 topbar + 内容区留活路，不许把会话
+                    // 区拖没）
+                    if let Some((start_y, start_h)) = c.layout.term.drag {
+                        let vh: f32 = window.viewport_size().height.into();
+                        let max_h = (vh - 240.).max(crate::shell::chat::TERM_PANEL_MIN_H);
+                        c.layout.term.h = (start_h + start_y - f32::from(ev.position.y))
+                            .clamp(crate::shell::chat::TERM_PANEL_MIN_H, max_h);
+                        cx.notify();
+                    }
                     if c.layout.split_drag {
                         if let Some(b) = c.layout.dock_bounds.borrow().as_ref() {
                             let dock_h = f32::from(b.size.height);
@@ -509,6 +519,9 @@ impl Render for Chat {
                         }
                         if c.layout.split_drag {
                             c.layout.split_drag = false;
+                            changed = true;
+                        }
+                        if c.layout.term.drag.take().is_some() {
                             changed = true;
                         }
                         if changed {
@@ -602,6 +615,14 @@ impl Render for Chat {
                     window,
                     cx,
                 ))
+                // 终端底部停靠面板（2026-11 用户定案：右下角、多标签）：
+                // 只占内容区下方的通栏，不遮 topbar（窗口钮/拖拽区不受影响）
+                .children(
+                    self.layout
+                        .term
+                        .open
+                        .then(|| crate::terminal::term_panel(self, &weak, cx)),
+                )
                 // §5.12 统一分隔线：常驻 1px / hover·拖拽 4px accent，线形由
                 // ui::divider 统一算（与 dock 上下分区同一条代码）；overlay
                 // 不占布局 = hover 零推挤。
@@ -685,6 +706,11 @@ impl Render for Chat {
                 this.layout.files_min = false;
                 this.persist_ui();
                 cx.notify();
+            }))
+            // 终端面板开关（Ctrl+`）：与标签条右侧收起钮同一方法——关 = 只
+            // 隐藏（PTY 保活），开 = 展开到已有激活终端 / 无终端则现生
+            .on_action(cx.listener(|this, _: &ToggleTerminal, window, cx| {
+                this.toggle_term_dock(window, cx);
             }))
             // 082 四期视图切换 Ctrl+←/→ 分流（绑定见 main.rs：锚定
             // "ContentTabs" 上下文 + Input 同深度后注册双绑定，内容区任意

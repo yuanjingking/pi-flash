@@ -44,6 +44,9 @@ pub(crate) enum Dialog {
     SessionInfo {
         kind: TopPanel,
     },
+    /// 091 用量统计：会话底部用量条点击打开，展示「每天 × 每模型」明细
+    /// （无状态——数据与滚动位都在 `Chat::aux.usage`）
+    UsageStats,
     /// 023 fileView：关闭带未保存修改的文件 tab 前确认。单关持一个 path；
     /// 标签右键批量关闭（tab 菜单移植 zed「N unsaved」）收拢整批待裁决
     /// 文件，弹窗三键对整批生效。持 path 不持 ix——弹窗存活期间的增删
@@ -110,7 +113,6 @@ impl DockPanel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ContentView {
     Chat,
-    Term,
     /// 文件查看 tab（PanelTab::File；主体渲染算法由 editor/kind.rs 的
     /// FileTypeHandler 按后缀决定：md 双态、图片查看器、代码/文本编辑器、
     /// 未注册走默认文本）
@@ -280,7 +282,6 @@ impl PillBtns {
 /// One content-area tab: a terminal session, a file viewer, or the changelog.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PanelTab {
-    Term(usize),
     File(PathBuf),
     /// 081 更新日志（新版本首启自动打开；无外部资源，纯渲染）
     Changelog,
@@ -315,7 +316,6 @@ pub(crate) enum PanelTab {
 /// 位算到漂移后的错误下标上（zed 用 item id 同语义）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TabKey {
-    Term(usize),
     File(PathBuf),
     Changelog,
     PiExtMarket,
@@ -330,7 +330,6 @@ pub(crate) enum TabKey {
 impl PanelTab {
     pub(crate) fn key(&self) -> TabKey {
         match self {
-            PanelTab::Term(id) => TabKey::Term(*id),
             PanelTab::File(p) => TabKey::File(p.clone()),
             PanelTab::Changelog => TabKey::Changelog,
             PanelTab::PiExtMarket => TabKey::PiExtMarket,
@@ -360,7 +359,6 @@ impl PanelTab {
     /// 该 tab 对应的内容区视图（切换/关闭回退共用）。
     pub(crate) fn view(&self) -> ContentView {
         match self {
-            PanelTab::Term(_) => ContentView::Term,
             PanelTab::File(_) => ContentView::File,
             PanelTab::Changelog => ContentView::Changelog,
             PanelTab::PiExtMarket => ContentView::PiExtMarket,
@@ -386,7 +384,6 @@ impl PanelTab {
     pub(crate) fn owns_view(&self, to: ContentView, wx_line: bool) -> bool {
         match self {
             PanelTab::Wx => to == ContentView::Wx || (to == ContentView::Chat && wx_line),
-            PanelTab::Term(_) => to == ContentView::Term,
             PanelTab::File(_) => to == ContentView::File,
             PanelTab::Changelog => to == ContentView::Changelog,
             PanelTab::PiExtMarket => to == ContentView::PiExtMarket,

@@ -577,11 +577,6 @@ impl Chat {
             return;
         }
         self.ws.active_panel_tab = Some(ix);
-        // 切到终端 tab：同步 active_terminal（按键/自动化都读它；否则双终端
-        // 切 tab 后输入会送进后台那个终端）
-        if let Some(tix) = self.shown_terminal_index() {
-            self.ws.active_terminal = Some(tix);
-        }
         // 文件标签驱动树同步：同项目定位选中，跨项目切工作区（点标签/开
         // 文件/键盘切 tab 都经这里，语义 = 激活的文件标签就是树的当前项目；
         // 会话标签去留见 switch_project 的 2026-12-06 保留规则）
@@ -624,7 +619,6 @@ impl Chat {
             return;
         }
         let view = match self.ws.panel_tabs.get(ix) {
-            Some(PanelTab::Term(_)) => ContentView::Term,
             Some(PanelTab::Changelog) => ContentView::Changelog,
             Some(PanelTab::PiExtMarket) => ContentView::PiExtMarket,
             Some(PanelTab::PiNativeMarket) => ContentView::PiNativeMarket,
@@ -741,31 +735,7 @@ impl Chat {
             return;
         }
         let removed = self.ws.panel_tabs.remove(ix);
-        if let PanelTab::Term(id) = &removed {
-            if let Some(tix) = self.ws.terminals.iter().position(|t| t.id == *id) {
-                let _ = self.ws.terminals[tix]
-                    .pty
-                    .send(alacritty_terminal::event_loop::Msg::Shutdown);
-                self.ws.terminals.remove(tix);
-                // 该终端的右键菜单若开着，随 tab 一起收（挂载处也校验，双保险）
-                if self.dlg.term_menu.is_some_and(|(tid, _, _)| tid == *id) {
-                    self.dlg.term_menu = None;
-                }
-                // 终端可开多个（同项目不限量）：下标随移除平移/夹紧，
-                // 否则 active_terminal 会指错终端或越界
-                self.ws.active_terminal = match self.ws.active_terminal {
-                    Some(a) if a == tix => {
-                        if self.ws.terminals.is_empty() {
-                            None
-                        } else {
-                            Some(tix.min(self.ws.terminals.len() - 1))
-                        }
-                    }
-                    Some(a) if a > tix => Some(a - 1),
-                    other => other,
-                };
-            }
-        }
+        let _ = removed;
         self.ws.active_panel_tab = match self.ws.active_panel_tab {
             // 关的是激活 tab：右邻补位（空表置 None）；关的在激活位左侧：
             // 激活下标随删左移一格（tab 条顺序稳定后激活位可以是任意下标）
@@ -779,10 +749,6 @@ impl Chat {
             Some(a) if a > ix => Some(a - 1),
             other => other,
         };
-        // 关 tab 后激活的可能就是另一个终端 tab：对齐一次（与激活路径同源）
-        if let Some(tix) = self.shown_terminal_index() {
-            self.ws.active_terminal = Some(tix);
-        }
         // 带子变了：落盘（内容相同自动跳过写盘；启动恢复期被抑制）
         self.persist_tabs();
         cx.notify();
@@ -806,18 +772,22 @@ impl Chat {
         // 标签自身在 `tabs` 数组里当瞬态页跳过（位置不存档，重启回到尾部）——
         // 开关态这一条腿与老档格式兼容。
         let wx_open = services::workspace::wx_enabled() && self.wx_tab_open();
+        // 终端不进 tab 带（2026-11）：它们是底部停靠面板的标签，落盘走
+        // terms/term_active/term_open 三条（面板收起不丢终端）
+        let terms: Vec<String> = self
+            .ws
+            .terminals
+            .iter()
+            .map(|t| t.cwd.to_string_lossy().to_string())
+            .collect();
         tabs_state_from_parts(
             &self.ws.panel_tabs,
-            |id| {
-                self.ws
-                    .terminals
-                    .iter()
-                    .find(|t| t.id == id)
-                    .map(|t| t.cwd.clone())
-            },
             self.ws.active_panel_tab,
             self.layout.content_view == ContentView::Chat,
             wx_open,
+            &terms,
+            self.ws.active_terminal,
+            self.layout.term.open,
         )
     }
 
@@ -844,7 +814,7 @@ impl Chat {
         mut window: Option<&mut gpui::Window>,
         cx: &mut Context<Self>,
     ) {
-        if saved.tabs.is_empty() && !saved.wx_open {
+        if saved.tabs.is_empty() && saved.terms.is_empty() && !saved.wx_open {
             return;
         }
         self.ws.tab_restore_busy = true;
@@ -863,25 +833,31 @@ impl Chat {
                         self.load_file_tab_core(p, cx);
                     }
                 }
-                "term" => {
-                    let p = PathBuf::from(&tab.path);
-                    if p.is_dir()
-                        && let Some(w) = window.as_deref_mut()
-                    {
-                        self.spawn_terminal_tab(p, w, cx);
-                    }
-                }
                 _ => {}
             }
+        }
+        // 终端面板回放（2026-11）：按 cwd 重生 PTY（进程不保活），不聚焦；
+        // 存档里开着的面板回放后仍然开着（无终端可生就算了，不出空面板）
+        for cwd in &saved.terms {
+            let p = PathBuf::from(cwd);
+            if p.is_dir()
+                && let Some(w) = window.as_deref_mut()
+            {
+                self.spawn_terminal_tab(p, w, cx);
+            }
+        }
+        if !self.ws.terminals.is_empty() {
+            self.ws.active_terminal = saved
+                .term_active
+                .filter(|a| *a < self.ws.terminals.len())
+                .or(Some(0));
+            self.layout.term.open = saved.term_open;
         }
         // 激活位与前台视图按存档复位（回放装载路不激活，这里是唯一复位
         // 点）；复位后焦点尾巴只留给「存档激活位是文本文件」的情况
         let active = saved.active.filter(|a| *a < self.ws.panel_tabs.len());
         if let Some(ix) = active {
             self.ws.active_panel_tab = Some(ix);
-            if let Some(tix) = self.shown_terminal_index() {
-                self.ws.active_terminal = Some(tix);
-            }
         }
         // 【微信通话】标签复原（002 模块跳转：重启恢复 = 打开后前往绑定页
         // 或会话页）。关着的标签就是 off，不做任何事。
@@ -919,15 +895,18 @@ impl Chat {
     }
 }
 
-/// 纯内核（单测直达）：从 tab 带构件算存档。`term_cwd` 查终端 cwd
-///（PanelTab::Term 只存运行期 id，落盘要换 cwd）；瞬态页（Changelog/
+/// 纯内核（单测直达）：从 tab 带 + 终端面板态算存档。瞬态页（Changelog/
 /// 市场/搜索）不进存档；超 [`services::workspace::TABS_SAVE_CAP`] 截尾。
+/// 终端是面板标签（不在 `panel_tabs` 里），单独走 `terms`/`term_active`/
+/// `term_open` 三条——面板收起也带着，重启回放有余地。
 fn tabs_state_from_parts(
     panel_tabs: &[PanelTab],
-    term_cwd: impl Fn(usize) -> Option<PathBuf>,
     active: Option<usize>,
     chat_front: bool,
     wx_open: bool,
+    terms: &[String],
+    term_active: Option<usize>,
+    term_open: bool,
 ) -> services::workspace::TabsState {
     let mut tabs = Vec::new();
     let mut orig_ix = Vec::new();
@@ -936,10 +915,6 @@ fn tabs_state_from_parts(
             PanelTab::File(p) => Some(services::workspace::SavedTab {
                 kind: "file".into(),
                 path: p.to_string_lossy().to_string(),
-            }),
-            PanelTab::Term(id) => term_cwd(*id).map(|cwd| services::workspace::SavedTab {
-                kind: "term".into(),
-                path: cwd.to_string_lossy().to_string(),
             }),
             _ => None,
         };
@@ -952,8 +927,14 @@ fn tabs_state_from_parts(
         }
     }
     let active = active.and_then(|a| orig_ix.iter().position(|&o| o == a));
+    let mut terms = terms.to_vec();
+    terms.truncate(services::workspace::TABS_SAVE_CAP);
+    let term_active = term_active.filter(|a| *a < terms.len());
     services::workspace::TabsState {
         tabs,
+        terms,
+        term_active,
+        term_open,
         active,
         chat: chat_front,
         wx_open,
@@ -990,7 +971,8 @@ mod tests {
     }
 
     /// 存档快照（pi-flash-weia）：瞬态页不进存档且激活位随之前移映射；
-    /// 终端 id 换 cwd；CAP 截尾后激活位越界被读侧滤掉。
+    /// 终端走面板三条（terms/term_active/term_open），不进 tab 带；
+    /// CAP 截尾后激活位越界被读侧滤掉。
     #[test]
     fn tabs_state_snapshot_maps_active_past_transient() {
         use super::tabs_state_from_parts;
@@ -1001,38 +983,37 @@ mod tests {
         let strip = [
             file("D:\\a\\x.rs"),
             PanelTab::Search, // 瞬态：不进存档
-            PanelTab::Term(7),
             file("D:\\a\\y.rs"),
         ];
-        let term_cwd = |id: usize| (id == 7).then(|| PathBuf::from("D:\\a"));
+        let terms = vec!["D:\\a".to_string(), "D:\\b".to_string()];
 
         // 激活位指向瞬态 Search：存档里无对应条目 → active=None
-        let st = tabs_state_from_parts(&strip, term_cwd, Some(1), false, false);
-        assert_eq!(st.tabs.len(), 3, "瞬态页不进存档");
+        let st = tabs_state_from_parts(&strip, Some(1), false, false, &terms, Some(1), true);
+        assert_eq!(st.tabs.len(), 2, "瞬态页不进存档");
         assert_eq!(st.active, None, "指向瞬态页的激活位不采信");
         assert!(!st.chat);
+        // 终端面板三条独立于 tab 带：收起与否都存
+        assert_eq!(st.terms, terms);
+        assert_eq!(st.term_active, Some(1));
+        assert!(st.term_open);
 
-        // 激活位指向 Term(7)：映射到存档下标 1；激活位是 term → chat=false
-        let st = tabs_state_from_parts(&strip, term_cwd, Some(2), false, false);
-        assert_eq!(st.active, Some(1));
-        assert_eq!(st.tabs[1].kind, "term");
-        assert_eq!(st.tabs[1].path, "D:\\a");
-
-        // 前台是会话 → chat=true，激活位照存（回到会话一键）
-        let st = tabs_state_from_parts(&strip, term_cwd, Some(3), true, false);
+        // 激活位指向 y.rs：瞬态 Search 剪掉后前移到 1；前台是会话 → chat=true
+        let st = tabs_state_from_parts(&strip, Some(2), true, false, &terms, Some(0), false);
         assert!(st.chat);
-        assert_eq!(st.active, Some(2), "瞬态页剪掉后 y.rs 前移到 2");
+        assert_eq!(st.active, Some(1), "瞬态页剪掉后 y.rs 前移到 1");
+        assert!(!st.term_open, "面板收起态照存（终端还在）");
+        assert_eq!(st.term_active, Some(0));
 
-        // 未知终端 id（terminals 已丢）：条目整体跳过
-        let st = tabs_state_from_parts(&strip, |_| None, None, true, false);
-        assert_eq!(st.tabs.len(), 2, "无 cwd 的终端不进存档");
+        // 终端下标越界：读侧滤掉（None）
+        let st = tabs_state_from_parts(&strip, None, true, false, &terms, Some(9), true);
+        assert_eq!(st.term_active, None);
 
         // CAP 截尾：截到 TABS_SAVE_CAP 条，不多不少
         let cap = crate::services::workspace::TABS_SAVE_CAP;
         let many: Vec<PanelTab> = (0..cap + 5)
             .map(|i| file(&format!("D:\\a\\f{i}.rs")))
             .collect();
-        let st = tabs_state_from_parts(&many, |_| None, None, true, false);
+        let st = tabs_state_from_parts(&many, None, true, false, &terms, None, true);
         assert_eq!(st.tabs.len(), cap);
     }
 }

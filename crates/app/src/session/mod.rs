@@ -262,7 +262,7 @@ fn session_fn_bar(
             "sfbar-term",
             "icon-terminal-solid",
             tr("session.open_terminal"),
-            chat.layout.content_view == crate::ContentView::Term,
+            chat.layout.term.open,
             cx.listener({
                 // 终端起点跟界面当前项目（微信前台 = wx_cwd）——旧实现开在
                 // 桌面项目里，微信页点「打开终端」看到的是别的目录

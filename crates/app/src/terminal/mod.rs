@@ -31,10 +31,12 @@ use gpui::{
 
 mod input_encode;
 mod palette;
+mod panel;
 mod snapshot;
 
 use input_encode::*;
 use palette::*;
+pub(crate) use panel::term_panel;
 pub(crate) use snapshot::*;
 
 use crate::Chat;
@@ -1320,10 +1322,11 @@ mod tests {
 
 impl Chat {
     /// 打开一个终端；`cwd_override` 为 psp 项目菜单定向打开时
-    /// 的项目目录，None = 当前工作区。v54: 终端在内容区 tab 显示。
+    /// 的项目目录，None = 当前工作区。2026-11 起终端在**内容区下沿的底部
+    /// 停靠面板**（通栏、多标签），不再进内容区 tab。
     ///
-    /// 不按 cwd 复用：每次调用都新开一个终端 tab（同一项目可开任意
-    /// 多个，tab 标题按目录名显示、允许重名），不跳回已有终端。
+    /// 不按 cwd 复用：每次调用都新开一个终端标签（同一项目可开任意
+    /// 多个，标签标题按目录名显示、允许重名），不跳回已有终端。
     pub(crate) fn open_terminal(
         &mut self,
         cwd_override: Option<PathBuf>,
@@ -1338,31 +1341,26 @@ impl Chat {
                 None => return,
             },
         };
-        // 生 tab（PTY + alacritty 事件泵），不激活不聚焦——启动 tab 恢复
-        //（pi-flash-weia）共用这条路，回放后按存档统一复位激活位
-        if !self.spawn_terminal_tab(term_cwd, window, cx) {
+        // 生终端（PTY + alacritty 事件泵）→ 激活到新标签并展开面板；
+        // 启动恢复（pi-flash-weia）复用 spawn_terminal_tab 后再统一复位
+        if self.spawn_terminal_tab(term_cwd, window, cx).is_none() {
             cx.notify();
             return;
         }
-        let tix = self.ws.panel_tabs.len() - 1;
-        self.activate_panel_tab(tix, cx);
-        self.set_content_view(ContentView::Term);
-        let focus = self.ws.terminals[self.ws.terminals.len() - 1].focus.clone();
-        window.focus(&focus);
-        cx.notify();
+        self.show_term_dock(window, cx);
     }
 
-    /// 终端 tab 装载核心：spawn PTY + 入 terminals + 带尾挂 `PanelTab::Term`
-    ///（open_terminal 与启动恢复共用；**不激活、不切视图、不聚焦**，调用
-    /// 方自行接续）。失败落状态条返回 false。
+    /// 终端装载核心：spawn PTY + 入 `ws.terminals`（open_terminal、脚本
+    /// 执行与启动恢复共用；**不展开面板、不聚焦**，调用方自行接续）。
+    /// 返回新终端在 `terminals` 里的下标；失败落状态条返回 None。
     pub(crate) fn spawn_terminal_tab(
         &mut self,
         term_cwd: PathBuf,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> Option<usize> {
         let Some(tx) = self.ws.term_events.clone() else {
-            return false;
+            return None;
         };
         let (cell_w, line_h) = terminal::measure_cell(window);
         let font_size = terminal::font_size();
@@ -1374,18 +1372,101 @@ impl Chat {
         {
             Ok(tab) => {
                 self.ws.terminals.push(tab);
-                self.ws.active_terminal = Some(self.ws.terminals.len() - 1);
-                self.ws.panel_tabs.push(PanelTab::Term(id));
-                true
+                let ix = self.ws.terminals.len() - 1;
+                self.ws.active_terminal = Some(ix);
+                Some(ix)
             }
             Err(e) => {
                 self.set_status(format!("terminal spawn failed: {e}"), cx);
-                false
+                None
             }
         }
     }
 
-    /// 021 文件树右键【执行】：脚本进新终端 tab——`cmd /k cd /d <目录> &&
+    /// 展开终端面板并聚焦当前激活的终端（无终端则不动——调用方负责生）。
+    /// 面板内的标签切换走 [`Self::activate_terminal`]。
+    pub(crate) fn show_term_dock(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some(ix) = self
+            .ws
+            .active_terminal
+            .filter(|ix| *ix < self.ws.terminals.len())
+            .or_else(|| (!self.ws.terminals.is_empty()).then_some(0))
+        else {
+            return;
+        };
+        self.ws.active_terminal = Some(ix);
+        self.layout.term.open = true;
+        self.ws.term_cursor_focused = true;
+        let focus = self.ws.terminals[ix].focus.clone();
+        window.focus(&focus);
+        self.persist_tabs();
+        cx.notify();
+    }
+
+    /// 终端面板展开/收起切换（Ctrl+`）：收起 = 只隐藏，PTY 保活（再展开
+    /// 还是原屏幕）；开着时无终端则按当前工作区新开一个。
+    pub(crate) fn toggle_term_dock(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        if self.layout.term.open {
+            self.layout.term.open = false;
+            self.ws.term_cursor_focused = false;
+            // 终端撤场后焦点交回内容区锚点（否则焦点留在一个不可见元素上）
+            let anchor = self.layout.focus.clone();
+            window.focus(&anchor);
+            self.persist_tabs();
+            cx.notify();
+            return;
+        }
+        if self.ws.terminals.is_empty() {
+            let Some(cwd) = self.ws.cwd.clone() else {
+                return;
+            };
+            if self.spawn_terminal_tab(cwd, window, cx).is_none() {
+                cx.notify();
+                return;
+            }
+        }
+        self.show_term_dock(window, cx);
+    }
+
+    /// 面板内标签切换（点标签 / 新建后定位）：只改激活位 + 焦点 + 滚动到
+    /// 可见，不动展开态。
+    pub(crate) fn activate_terminal(&mut self, ix: usize, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.ws.terminals.get(ix) else {
+            return;
+        };
+        self.ws.active_terminal = Some(ix);
+        let focus = tab.focus.clone();
+        window.focus(&focus);
+        self.layout.term.tabs_scroll.scroll_to_item(ix);
+        self.persist_tabs();
+        cx.notify();
+    }
+
+    /// 关闭一个终端（面板标签 ×、裸 `exit` 都走这里）：PTY Shutdown + 移除
+    /// 记录 + 收敛激活位与右键菜单；关完最后一个就收起面板。
+    pub(crate) fn close_terminal(&mut self, tab_id: usize, cx: &mut Context<Self>) {
+        use alacritty_terminal::event_loop::Msg;
+        let Some(ix) = self.ws.terminals.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+        let tab = self.ws.terminals.remove(ix);
+        let _ = tab.pty.send(Msg::Shutdown);
+        if self.dlg.term_menu.is_some_and(|(tid, _, _)| tid == tab_id) {
+            self.dlg.term_menu = None;
+        }
+        self.ws.active_terminal = if self.ws.terminals.is_empty() {
+            None
+        } else {
+            Some(ix.min(self.ws.terminals.len() - 1))
+        };
+        if self.ws.active_terminal.is_none() {
+            self.layout.term.open = false;
+        }
+        self.persist_tabs();
+        cx.notify();
+    }
+
+    /// 021 文件树右键【执行】：脚本进新终端——`cmd /k cd /d <目录> &&
     /// <命令>`，脚本退出留提示符，交互/续敲都行。PTY working_directory 落
     /// 文件目录；命令里的 cd 另一半是 cmd 引号规则护盾（script_exec 模块头）。
     pub(crate) fn open_script_terminal(
@@ -1424,13 +1505,7 @@ impl Chat {
             Ok(tab) => {
                 self.ws.terminals.push(tab);
                 self.ws.active_terminal = Some(self.ws.terminals.len() - 1);
-                self.ws.panel_tabs.push(PanelTab::Term(id));
-                let tix = self.ws.panel_tabs.len() - 1;
-                self.activate_panel_tab(tix, cx);
-                self.set_content_view(ContentView::Term);
-                let focus = self.ws.terminals[self.ws.terminals.len() - 1].focus.clone();
-                window.focus(&focus);
-                cx.notify();
+                self.show_term_dock(window, cx);
             }
             Err(e) => {
                 self.set_status(format!("terminal spawn failed: {e}"), cx);
@@ -1439,22 +1514,18 @@ impl Chat {
         }
     }
 
-    /// 内容区**当前显示**的终端在 `terminals` 里的下标（None = 激活的
-    /// panel tab 不是终端）。`term_view` 就是按 `active_panel_tab` 渲染的，
-    /// 所以这条是「渲染面」的唯一口径。
+    /// 终端面板当前展示的终端下标（None = 面板收起或没有终端）。面板只
+    /// 展示一个终端（激活标签），所以这就是「渲染面」的唯一口径。
     pub(crate) fn shown_terminal_index(&self) -> Option<usize> {
-        let id = match self
-            .ws
-            .active_panel_tab
-            .and_then(|ix| self.ws.panel_tabs.get(ix))?
-        {
-            PanelTab::Term(id) => *id,
-            _ => return None,
-        };
-        self.ws.terminals.iter().position(|t| t.id == id)
+        if !self.layout.term.open {
+            return None;
+        }
+        self.ws
+            .active_terminal
+            .filter(|ix| *ix < self.ws.terminals.len())
     }
 
-    /// 当前显示终端的焦点句柄（渲染帧焦点仲裁用）。
+    /// 当前展示终端的焦点句柄（渲染帧焦点仲裁用）。
     pub(crate) fn shown_terminal_focus(&self) -> Option<gpui::FocusHandle> {
         self.shown_terminal_index()
             .and_then(|ix| self.ws.terminals.get(ix))
@@ -1636,23 +1707,14 @@ impl Chat {
         };
         // 裸 `exit` 拦截：内嵌终端里 shell 退出只会留下一块「Process
         // exited」死面，没有再进去的路。Enter 时看一眼光标行，命令就是
-        // `exit` 就当作用户要关这个终端——直接关掉 tab（同点 tab 的 ×，
-        // PTY Shutdown 一并走）。`exit 0` 等带参数的不算，照常执行（出
+        // `exit` 就当作用户要关这个终端——直接关掉面板标签（同点标签的
+        // ×，PTY Shutdown 一并走）。`exit 0` 等带参数的不算，照常执行（出
         // 横幅不崩）；全屏应用不掺和。
-        if k.key == "enter" && !mode.contains(TermMode::ALT_SCREEN) {
-            let bare_exit = is_bare_exit(&tab.term.lock());
-            let tab_id = tab.id;
-            if bare_exit
-                && let Some(ix) = self
-                    .ws
-                    .panel_tabs
-                    .iter()
-                    .position(|t| matches!(t, crate::PanelTab::Term(id) if *id == tab_id))
-            {
-                self.close_tab_at(ix, cx);
-                cx.stop_propagation();
-                return;
-            }
+        if k.key == "enter" && !mode.contains(TermMode::ALT_SCREEN) && is_bare_exit(&tab.term.lock())
+        {
+            self.close_terminal(tab_id, cx);
+            cx.stop_propagation();
+            return;
         }
         if let Some(bytes) = terminal::keystroke_to_pty(k, &mode) {
             let _ = tab.pty.send(Msg::Input(bytes.into()));

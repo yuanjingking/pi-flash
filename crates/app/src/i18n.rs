@@ -613,6 +613,10 @@ const TABLE: &[(&str, &str, &str, &str)] = &[
     // exit banner
     ("exit.process_exited", "Process exited with code {code_text}", "Process exited with code {code_text}", "Process exited with code {code_text}"),
     ("exit.unknown", "unknown", "unknown", "unknown"),
+    // 底部终端面板（terminal::panel，2026-11）
+    ("terminal.new_tab", "新建终端", "新增終端機", "New terminal"),
+    ("terminal.hide", "收起终端面板", "收起終端機面板", "Hide terminal panel"),
+    ("terminal.resize_tip", "拖动调整终端高度（双击复位）", "拖動調整終端機高度（雙擊復位）", "Drag to resize terminal (double-click to reset)"),
     // git badges etc stay ASCII
     // ---- 以下为存量漏译：繁/英待补，tr() 回落中文 ----
     ("actions.edit", "编辑", "編輯", "Edit"),
@@ -788,6 +792,17 @@ const TABLE: &[(&str, &str, &str, &str)] = &[
     ("stats.no_usage", "会话尚未产生用量。", "會話尚未產生用量。", "No usage recorded for this session yet."),
     ("stats.share", "使用比例", "使用比例", "Share"),
     ("stats.tokens_total", "Token 累计", "Token 累計", "Total tokens"),
+    // 091 用量统计（会话底部条 / 轮末消耗行 / 每日×每模型明细弹窗）
+    ("usage.cache", "缓存", "快取", "Cache"),
+    ("usage.calls", "次调用", "次呼叫", "calls"),
+    ("usage.empty", "还没有可统计的会话用量。", "還沒有可統計的會話用量。", "No session usage recorded yet."),
+    ("usage.files", "个会话", "個會話", "sessions"),
+    ("usage.io", "输入 / 输出", "輸入 / 輸出", "Input / Output"),
+    ("usage.loading", "正在统计会话用量…", "正在統計會話用量…", "Aggregating session usage…"),
+    ("usage.model", "模型", "模型", "Model"),
+    ("usage.stats_title", "用量统计", "用量統計", "Usage statistics"),
+    ("usage.total_tokens", "Token 累计", "Token 累計", "Total tokens"),
+    ("usage.turn", "本次", "本次", "This turn"),
     ("stats.total_cost", "累计费用", "累計費用", "Total cost"),
     ("status.running_tool", "正在运行 {name}...", "正在運行 {name}...", "Running {name}..."),
     ("status.running_tools", "正在运行 {names}...", "正在運行 {names}...", "Running {names}..."),

@@ -165,6 +165,9 @@ fn term_surface(chat: &Chat, window: &gpui::Window, _cx: &Context<Chat>) -> Valu
     json!({
         "terminals": tabs,
         "active_terminal": chat.ws.active_terminal,
+        // 面板展开态（2026-11：终端是底部停靠面板，不是内容区视图）
+        "term_open": chat.layout.term.open,
+        "term_h": chat.layout.term.h,
         "content_view": content_view_str(chat.layout.content_view),
     })
 }
@@ -225,6 +228,7 @@ fn app_surface(chat: &Chat, window: &gpui::Window, cx: &Context<Chat>) -> Value 
         "active_file": opt_path(chat.psp.active_file.as_ref()),
         "terminals": chat.ws.terminals.len(),
         "active_terminal": chat.ws.active_terminal,
+        "term_open": chat.layout.term.open,
         // 031/040 full+ 档扩展面板：按钮可用性（full+ 档即可，勾选即生效）
         "plugin_menu": {
             "available": chat
@@ -690,7 +694,6 @@ fn files_surface(chat: &Chat, cx: &Context<Chat>) -> Value {
         "file_tabs": file_tabs,
         "ext_probe": {"runs": chat.ws.ext_probe.0, "hits": chat.ws.ext_probe.1},
         "open_tabs": chat.ws.panel_tabs.iter().map(|t| match t {
-            crate::PanelTab::Term(i) => json!({"term": i}),
             crate::PanelTab::File(p) => json!({"file": p.display().to_string()}),
             crate::PanelTab::Changelog => json!({"changelog": true}),
             crate::PanelTab::PiExtMarket => json!({"pi_ext_market": true}),
@@ -805,6 +808,7 @@ fn dialogs_surface(chat: &Chat, cx: &Context<Chat>) -> Value {
         Dialog::ProjectPicker { .. } => "project_picker",
         Dialog::ImagePreview { .. } => "image_preview",
         Dialog::SessionInfo { .. } => "session_info",
+        Dialog::UsageStats => "usage_stats",
         Dialog::FileDirty { .. } => "file_dirty",
         Dialog::WxQr => "wx_qr",
         Dialog::WxNewSession => "wx_new_session",
@@ -880,7 +884,6 @@ fn dialogs_surface(chat: &Chat, cx: &Context<Chat>) -> Value {
 fn content_view_str(v: crate::ContentView) -> &'static str {
     match v {
         crate::ContentView::Chat => "chat",
-        crate::ContentView::Term => "term",
         crate::ContentView::File => "file",
         crate::ContentView::Changelog => "changelog",
         crate::ContentView::PiExtMarket => "pi-ext-market",

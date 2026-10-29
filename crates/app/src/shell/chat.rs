@@ -63,6 +63,8 @@ pub(crate) struct AuxUi {
     pub(crate) sysprompt_scroll: gpui::ScrollHandle,
     /// 系统提示词面板各桶「调用声明」折叠块的展开态（按 SYSTEM_BUCKETS 下标）
     pub(crate) decl_open: [bool; 7],
+    /// 091 用量统计：每日×每模型明细快照 + 滚动位（弹窗按需后台重算）
+    pub(crate) usage: crate::usage::UsageUi,
 }
 
 /// 设置面板状态簇（4ea 字段重组）：模型/技能/扩展/MCP 页的全部
@@ -390,7 +392,43 @@ pub(crate) struct LayoutUi {
     /// 视口（Ctrl+←/→ 切到屏外 tab 时不再「激活了但看不见/点不到」）；
     /// 必须跨帧复用（每帧 new = 滚动位全丢，见 docs/agents/gpui.md）
     pub(crate) tabs_scroll: gpui::ScrollHandle,
+    /// 底部终端面板（2026-11 用户定案：终端移出内容区 tab，改内容区下沿
+    /// 通栏停靠面板，面板自带标签条切换多个终端）
+    pub(crate) term: TermDock,
     pub(crate) focus: FocusHandle,
+}
+
+/// 底部终端面板状态。终端进程活在 `WsUi::terminals`（按 id 索引），这里
+/// 只有「面板怎么摆」：展开/高度/拖拽/标签条滚动位。收起 = 只隐藏，PTY
+/// 保活（重开即见原屏幕，不走重启）。
+pub(crate) struct TermDock {
+    /// 展开态（快捷键 / 打开终端 / 收起钮切换）
+    pub(crate) open: bool,
+    /// 面板高度（px，拖上沿改；落盘 `UiState::term_h`）
+    pub(crate) h: f32,
+    /// 上沿命中带悬停（§5.12 分隔线 hover 态位，不用 group_hover）
+    pub(crate) hover: bool,
+    /// 拖拽起点（按下点 y, 起始高度）；跟踪在 app-body 层
+    pub(crate) drag: Option<(f32, f32)>,
+    /// 面板标签条横向滚动句柄（同 topbar `tabs_scroll`，跨帧复用）
+    pub(crate) tabs_scroll: gpui::ScrollHandle,
+}
+
+/// 终端面板默认/最小高度（px）。默认 260 ≈ 16 行终端（13px 字号 1.25 行
+/// 高）；最小 120 ≈ 5 行。上限在拖拽点按窗高夹（留出内容区最小可视面）。
+pub(crate) const TERM_PANEL_H: f32 = 260.;
+pub(crate) const TERM_PANEL_MIN_H: f32 = 120.;
+
+impl TermDock {
+    fn new(h: f32) -> Self {
+        Self {
+            open: false,
+            h: h.clamp(TERM_PANEL_MIN_H, 900.),
+            hover: false,
+            drag: None,
+            tabs_scroll: gpui::ScrollHandle::new(),
+        }
+    }
 }
 
 /// 工作区簇（4ea 字段重组）：文件树/fs 监听、编辑器 tab/md 预览、终端、
@@ -586,13 +624,14 @@ impl Chat {
                 dock_bounds: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ft_title_bounds: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 content_view: ContentView::Chat,
-                browse_last: ContentView::Term,
+                browse_last: ContentView::File,
                 nav_open: false,
                 nav_hide_at: None,
                 nav_flyout_hovered: false,
                 nav_hover_turn: None,
                 nav_flyout_list: gpui::ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
                 tabs_scroll: gpui::ScrollHandle::new(),
+                term: TermDock::new(ui.term_h.unwrap_or(TERM_PANEL_H)),
             },
             composer: ComposerUi {
                 input: String::new(),
@@ -756,6 +795,7 @@ impl Chat {
                 tool_sel: None,
                 sysprompt_scroll: gpui::ScrollHandle::new(),
                 decl_open: [false; 7],
+                usage: crate::usage::UsageUi::default(),
                 ext_input: cx.new(|cx| TextInput::new(cx)),
             },
         };
@@ -942,7 +982,7 @@ impl Chat {
 
     pub(crate) fn set_content_view(&mut self, v: ContentView) {
         self.layout.content_view = v;
-        if matches!(v, ContentView::Term | ContentView::File) {
+        if matches!(v, ContentView::File) {
             self.layout.browse_last = v;
         }
         // 前台视图变化也是 tab 带状态（重启要复原前台），变更点即落盘

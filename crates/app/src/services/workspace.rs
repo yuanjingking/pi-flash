@@ -298,12 +298,15 @@ fn purge_app_paths_in_map(map: &mut serde_json::Map<String, Value>, root: Option
 }
 
 // ---------------------------------------------------------------------------
-// 内容区 tab 带持久化（`__tabs`：{ tabs, active, chat }，单槽全局）
+// 内容区 tab 带持久化（`__tabs`：{ tabs, terms, active, term_active, chat,
+// term_open }，单槽全局）
 //
-// 启动恢复的第二条腿（会话之外）：文件/终端 tab 跨重启复原。终端进程不
-// 保活（PTY 随进程亡），恢复 = 按 cwd 重开；Changelog/市场/搜索页属瞬态
-// 页不持久化。写入时机 = tab 带变更点（开关/激活/拖位）+ 关窗，内容相同
-// 自动跳过写盘。
+// 启动恢复的第二条腿（会话之外）：文件 tab 与终端面板跨重启复原。终端
+// 2026-11 起不再占内容区 tab（底部停靠面板，自带标签条），故 cwd 清单单列
+// 成 `terms`（=`ws.terminals` 的打开序）；终端进程不保活（PTY 随进程亡），
+// 恢复 = 按 cwd 重开；Changelog/市场/搜索页属瞬态页不持久化。写入时机 =
+// tab 带/终端面板变更点（开关/激活/拖位/拖高）+ 关窗，内容相同自动跳过
+// 写盘。
 //
 // **单槽全局**（2026-11 修订，首版 per-project 是踩错的坑）：内存里
 // panel_tabs 本就是全局态（切项目不清带），按项目分槽会存出多份漂移拷贝
@@ -314,9 +317,10 @@ fn purge_app_paths_in_map(map: &mut serde_json::Map<String, Value>, root: Option
 /// 一条持久化的 tab（pi-flash-weia）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedTab {
-    /// "file" | "term"
+    /// 目前只有 "file"（"term" 是 2026-11 前的旧档条目，读侧迁移进
+    /// [`TabsState::terms`]，写侧不再产出）
     pub kind: String,
-    /// file = 文件绝对路径；term = 终端 cwd（重开时进程已亡，按 cwd 重生）
+    /// 文件绝对路径
     pub path: String,
 }
 
@@ -324,6 +328,14 @@ pub struct SavedTab {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TabsState {
     pub tabs: Vec<SavedTab>,
+    /// 底部终端面板的 cwd 清单（顺序 = 面板标签顺序；旧档 kind=="term"
+    /// 的条目在读侧迁到这里）
+    pub terms: Vec<String>,
+    /// 终端面板激活标签下标（None = 越界/未激活）
+    pub term_active: Option<usize>,
+    /// 关停时终端面板是否展开（收起态 PTY 不保活，重启只恢复「开着」这
+    /// 一条腿：展开且有终端才恢复）
+    pub term_open: bool,
     /// 关停时自由区激活 tab 下标（None = 未激活/越界，恢复时落默认）
     pub active: Option<usize>,
     /// 关停时内容区前台是会话 tab（false = 前台是激活 tab 的视图）
@@ -336,6 +348,18 @@ pub struct TabsState {
 /// 纯内核：从 JSON 值读 tab 带存档（无记录/旧版 per-project 嵌套形态 =
 /// None——旧形态无顶层 `tabs` 字段，首次落盘即被新形态覆盖自迁移）。
 fn tabs_state_from_value(v: &Value) -> Option<TabsState> {
+    let mut terms: Vec<String> = v
+        .get("terms")
+        .and_then(|t| t.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| e.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .take(TABS_SAVE_CAP)
+                .collect()
+        })
+        .unwrap_or_default();
     let tabs: Vec<SavedTab> = v
         .get("tabs")?
         .as_array()?
@@ -344,12 +368,29 @@ fn tabs_state_from_value(v: &Value) -> Option<TabsState> {
             let kind = e.get("k")?.as_str()?.to_string();
             let path = e.get("p")?.as_str()?.to_string();
             match kind.as_str() {
-                "file" | "term" if !path.is_empty() => Some(SavedTab { kind, path }),
+                "file" if !path.is_empty() => Some(SavedTab { kind, path }),
+                // 2026-11 前的旧档：终端曾是内容区 tab；迁进 terms（追加到
+                // 显式清单之后，保持旧档的打开序）
+                "term" if !path.is_empty() => {
+                    terms.push(path);
+                    None
+                }
                 _ => None,
             }
         })
         .take(TABS_SAVE_CAP)
         .collect();
+    terms.truncate(TABS_SAVE_CAP);
+    let term_active = v
+        .get("term_active")
+        .and_then(|a| a.as_u64())
+        .map(|a| a as usize)
+        .filter(|a| *a < terms.len());
+    let term_open = v
+        .get("term_open")
+        .and_then(|b| b.as_bool())
+        // 旧档没有该字段：有终端就按展开恢复（旧行为 = 终端 tab 就在前台）
+        .unwrap_or(!terms.is_empty());
     let active = v
         .get("active")
         .and_then(|a| a.as_u64())
@@ -365,6 +406,9 @@ fn tabs_state_from_value(v: &Value) -> Option<TabsState> {
         .unwrap_or(false);
     Some(TabsState {
         tabs,
+        terms,
+        term_active,
+        term_open,
         active,
         chat,
         wx_open,
@@ -381,7 +425,7 @@ fn tabs_state_to_value(state: &TabsState) -> Option<Value> {
     // 空带通常 = 移除槽位（启动落默认 chat）；唯独微信标签开着要单独能
     // 存活——[设置会话] 页时 tab 带本就为空，若这里返回 None，重启就
     // 「蹿回桌面会话对话页」（2026-10-25 真机事故）
-    if state.tabs.is_empty() && !state.wx_open {
+    if state.tabs.is_empty() && state.terms.is_empty() && !state.wx_open {
         return None;
     }
     let tabs: Vec<Value> = state
@@ -390,9 +434,18 @@ fn tabs_state_to_value(state: &TabsState) -> Option<Value> {
         .take(TABS_SAVE_CAP)
         .map(|t| serde_json::json!({ "k": t.kind, "p": t.path }))
         .collect();
+    let terms: Vec<&str> = state
+        .terms
+        .iter()
+        .take(TABS_SAVE_CAP)
+        .map(String::as_str)
+        .collect();
     Some(serde_json::json!({
         "tabs": tabs,
+        "terms": terms,
         "active": state.active,
+        "term_active": state.term_active,
+        "term_open": state.term_open,
         "chat": state.chat,
         "wx_open": state.wx_open,
     }))
@@ -449,6 +502,8 @@ pub struct UiState {
     pub tree_changes_only: bool,
     /// 020-1 整合面板：会话子面板高度占比（0..1）；None = 默认 50/50
     pub dock_split: Option<f32>,
+    /// 底部终端面板高度（px，拖上沿落盘；None = 默认档）
+    pub term_h: Option<f32>,
     /// 020 项目用户排序（psp 项目组 ws_key 有序表，拖拽落位产物）；空 =
     /// 无记录（列表用首建活动序）
     pub proj_order: Vec<String>,
@@ -473,6 +528,7 @@ impl Default for UiState {
             tree_changes_only: false,
             dock_max: "none".into(),
             dock_split: None,
+            term_h: None,
             proj_order: Vec::new(),
             session_pins: Vec::new(),
         }
@@ -546,6 +602,10 @@ pub fn ui_state() -> UiState {
             .filter(|s| matches!(*s, "files" | "sessions"))
             .unwrap_or("none")
             .to_string(),
+        term_h: v
+            .get("term_h")
+            .and_then(|h| h.as_f64())
+            .map(|h| (h as f32).clamp(120., 900.)),
         session_pins: v
             .get("session_pins")
             .and_then(|c| c.as_array())
@@ -593,6 +653,7 @@ pub fn save_ui_state(s: &UiState) {
             "dock_split": s.dock_split,
             "proj_order": s.proj_order,
             "dock_max": s.dock_max,
+            "term_h": s.term_h,
             "session_pins": s.session_pins,
         }),
     );
@@ -1517,17 +1578,14 @@ mod tests {
     #[test]
     fn tabs_state_roundtrip_and_prune() {
         let state = TabsState {
-            tabs: vec![
-                SavedTab {
-                    kind: "file".into(),
-                    path: "D:\\a\\b.rs".into(),
-                },
-                SavedTab {
-                    kind: "term".into(),
-                    path: "D:\\a".into(),
-                },
-            ],
-            active: Some(1),
+            tabs: vec![SavedTab {
+                kind: "file".into(),
+                path: "D:\\a\\b.rs".into(),
+            }],
+            terms: vec!["D:\\a".into()],
+            term_active: Some(0),
+            term_open: true,
+            active: Some(0),
             chat: false,
             wx_open: false,
         };
@@ -1549,10 +1607,8 @@ mod tests {
         // 空带 = None（写侧据此移除槽位）；微信标签开着例外（可单独存活）
         assert!(tabs_state_to_value(&TabsState::default()).is_none());
         let wx_only = TabsState {
-            tabs: vec![],
-            active: None,
-            chat: false,
             wx_open: true,
+            ..TabsState::default()
         };
         assert!(tabs_state_to_value(&wx_only).is_some());
 
@@ -1565,14 +1621,16 @@ mod tests {
             assert!(back.wx_open, "旧档兼容：开着的标签要还回来");
         }
 
-        // 非法条目读侧丢弃（kind 不识 / 空 path）
+        // 旧档 kind=="term"：迁进 terms（终端 2026-11 前曾是内容区 tab）
         let v = serde_json::json!({ "tabs": [
             {"k": "file", "p": "D:\\x.rs"},
             {"k": "market", "p": ""},
-            {"k": "term", "p": ""},
+            {"k": "term", "p": "D:\\proj"},
         ], "active": 0, "chat": true });
         let back = tabs_state_from_value(&v).unwrap();
         assert_eq!(back.tabs.len(), 1, "非法条目丢弃");
+        assert_eq!(back.terms, vec!["D:\\proj".to_string()], "旧终端条目迁入 terms");
+        assert!(back.term_open, "旧档无 term_open：有终端按展开恢复");
 
         // 旧版 per-project 嵌套形态（无顶层 tabs）= 不识别
         let legacy = serde_json::json!({ "d:\\a": { "tabs": [

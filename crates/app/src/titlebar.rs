@@ -305,27 +305,6 @@ fn tab_strip(chat: &mut Chat, cx: &mut gpui::Context<Chat>) -> gpui::AnyElement 
             Option<&'static str>,
             ContentView,
         ) = match tab {
-            crate::PanelTab::Term(id) => {
-                let title = chat
-                    .ws
-                    .terminals
-                    .iter()
-                    .find(|t| t.id == *id)
-                    .map(|t| {
-                        t.cwd
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    })
-                    .unwrap_or_default();
-                (
-                    title.into(),
-                    None,
-                    false,
-                    Some("icon-terminal-solid"),
-                    ContentView::Term,
-                )
-            }
             crate::PanelTab::File(p) => (
                 p.file_name()
                     .map(|n| n.to_string_lossy().to_string())

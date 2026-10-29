@@ -275,8 +275,8 @@ pub(super) fn dispatch(
                 "chat" => chat.layout.focus.clone(),
                 "git_commit" => chat.ws.git_commit_input.read(cx).focus_handle(),
                 "terminal" => {
-                    // 优先给**当前显示**的终端（渲染面 = active_panel_tab），
-                    // 没显示终端时退到 active_terminal 记录的那个
+                    // 面板展开时给当前激活标签的终端；收起时退到 active_terminal
+                    // 记录的那个（自动化照旧能干）
                     chat.shown_terminal_focus()
                         .or_else(|| {
                             let ix = chat.ws.active_terminal.unwrap_or(0);
@@ -309,15 +309,16 @@ pub(super) fn dispatch(
             Ok(json!({"ok": true, "target": target}))
         }
         method::TERMINAL_OPEN => {
-            // 打开（或聚焦）工作区终端；键入回显断言读 term 快照面
+            // 打开（或聚焦）工作区终端：2026-11 起落到底部停靠面板新开标签
+            //（不占内容区 tab），面板自动展开；键入回显断言读 term 快照面
             chat.open_terminal(None, window, cx);
             Ok(json!({
                 "ok": true,
                 "terminals": chat.ws.terminals.len(),
                 "active_terminal": chat.ws.active_terminal,
+                "term_open": chat.layout.term.open,
                 "content_view": match chat.layout.content_view {
                     ContentView::Chat => "chat",
-                    ContentView::Term => "term",
                     ContentView::File => "file",
                     ContentView::Changelog => "changelog",
                     ContentView::PiExtMarket => "pi-ext-market",
@@ -479,7 +480,9 @@ pub(super) fn dispatch(
                 .ok_or_else(|| bad("需要 {\"view\": \"chat|term|file\"}"))?;
             match view {
                 "chat" => chat.set_content_view(ContentView::Chat),
-                "term" => chat.set_content_view(ContentView::Term),
+                // 终端不再是内容区视图：此方法 = 展开底部终端面板（有终端就
+                // 显示激活标签，没有就现开一个），同 Ctrl+`
+                "term" => chat.toggle_term_dock(window, cx),
                 "file" => chat.set_content_view(ContentView::File),
                 // 040-1：市场页走真开页路径（建搜索框 + ensure_loaded 拉首页）
                 "pi-ext-market" => chat.open_pi_ext_market(cx),

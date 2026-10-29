@@ -1,8 +1,9 @@
-//! 内容区 (v54): topbar-r 之下的一切。状态机 chat / term / md —— 终端与
-//! markdown 预览以 topbar tab 打开（Obsidian 式），聊天为默认视图。内容
-//! 区直通窗口底（statusbar 只在面板段）。
+//! 内容区 (v54): topbar-r 之下的一切。状态机 chat / md —— markdown 预览
+//! 以 topbar tab 打开（Obsidian 式），聊天为默认视图。终端 2026-11 起迁出
+//! 内容区 tab，改内容区下沿的底部停靠面板（`terminal::panel`）；内容区
+//! 直通窗口底（statusbar 只在面板段）。
 
-use gpui::{Context, Entity, KeyDownEvent, MouseButton, SharedString, div, prelude::*, px, rgb};
+use gpui::{Context, Entity, SharedString, div, prelude::*, px, rgb};
 
 use crate::Chat;
 use crate::ContentView;
@@ -23,9 +24,6 @@ pub(crate) fn content_main(
         ContentView::Chat => {
             crate::session::main_column(chat, entity, weak, window, cx).into_any_element()
         }
-        ContentView::Term => term_view(chat, weak, window, cx)
-            .map(|d| d.into_any_element())
-            .unwrap_or_else(|| empty_hint(tr("terminal.none"), t)),
         ContentView::File => {
             crate::editor::view::file_view(chat, weak, window, cx).into_any_element()
         }
@@ -160,93 +158,4 @@ fn changelog_view(chat: &mut Chat) -> gpui::AnyElement {
         col = col.child(empty_hint(tr("about.no_changelog_available"), t));
     }
     col.into_any_element()
-}
-
-// ---------------------------------------------------------------------------
-// 终端视图：纯暗面（tab 在 topbar-r；失败/退出横幅保留；无 38px 头）
-// ---------------------------------------------------------------------------
-
-pub(crate) fn term_view(
-    chat: &mut Chat,
-    weak: &gpui::WeakEntity<Chat>,
-    _window: &mut gpui::Window,
-    cx: &mut Context<Chat>,
-) -> Option<gpui::AnyElement> {
-    let _t = T();
-    let body: Option<gpui::AnyElement> = chat
-        .ws
-        .active_panel_tab
-        .and_then(|ix| chat.ws.panel_tabs.get(ix).cloned())
-        .map(|tab| match tab {
-            crate::PanelTab::File(_) => div().into_any_element(),
-            crate::PanelTab::Changelog => div().into_any_element(),
-            crate::PanelTab::PiExtMarket => div().into_any_element(),
-            crate::PanelTab::PiNativeMarket => div().into_any_element(),
-            crate::PanelTab::PfMarket => div().into_any_element(),
-            crate::PanelTab::Search => div().into_any_element(),
-            crate::PanelTab::SessionSearch => div().into_any_element(),
-            // 插件预览页签不是终端，body 走 content.rs 的 ContentView 分支
-            crate::PanelTab::Plugin { .. } => div().into_any_element(),
-            // 微信 tab 不是终端，body 走 content.rs 的 ContentView 分支
-            crate::PanelTab::Wx => div().into_any_element(),
-            crate::PanelTab::Term(id) => {
-                let tix = chat.ws.terminals.iter().position(|t| t.id == id);
-                let Some(tix) = tix else {
-                    return div().into_any_element();
-                };
-                let tab = &chat.ws.terminals[tix];
-                let mut col = div().flex_1().min_h_0().flex().flex_col();
-                match &tab.status {
-                    crate::terminal::TermStatus::Exited(code) => {
-                        let code_text = code
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| tr("exit.unknown").to_string());
-                        col = col.child(
-                            div()
-                                .py(px(7.))
-                                .px(px(12.))
-                                .text_size(crate::appearance::ui_size(11.))
-                                .font_family(crate::terminal::FONT_FAMILY)
-                                .text_color(rgb(0x6e8a7d))
-                                .child(SharedString::from(crate::i18n::tf(
-                                    "exit.process_exited",
-                                    &[("code_text", code_text)],
-                                ))),
-                        );
-                    }
-                    crate::terminal::TermStatus::Ready => {}
-                }
-                col.child(
-                    div().flex_1().min_h_0().bg(rgb(0x141a17)).child(
-                        crate::terminal::TerminalElement::new(tab, weak.clone())
-                            .blink_on(chat.ws.term_cursor_on)
-                            .track_focus(&tab.focus)
-                            .flex_1()
-                            .h_full()
-                            .on_mouse_down(MouseButton::Left, {
-                                let f = tab.focus.clone();
-                                move |_, window, _cx| {
-                                    window.focus(&f);
-                                }
-                            })
-                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| {
-                                this.terminal_key(ev, cx);
-                            })),
-                    ),
-                )
-                .into_any_element()
-            }
-        });
-
-    body.map(|b| {
-        div()
-            .id("term-view")
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .bg(rgb(0x141a17))
-            .child(b)
-            .into_any_element()
-    })
 }

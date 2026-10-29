@@ -112,7 +112,8 @@ impl Chat {
         self.flush_pending_send(cx);
     }
 
-    /// psp 项目菜单「在终端中打开」：以该项目为 cwd 开终端 + 切内容区 tab。
+    /// psp 项目菜单「在终端中打开」：以该项目为 cwd 在底部终端面板新开
+    /// 一个标签 + 展开面板（2026-11：终端不再占内容区 tab）。
     pub(crate) fn open_terminal_in(
         &mut self,
         cwd: PathBuf,
@@ -120,7 +121,6 @@ impl Chat {
         cx: &mut Context<Self>,
     ) {
         self.open_terminal(Some(cwd), window, cx);
-        self.set_content_view(ContentView::Term);
         cx.notify();
     }
 
