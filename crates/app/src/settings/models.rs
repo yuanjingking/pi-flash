@@ -1489,6 +1489,22 @@ pub(crate) enum MjTestState {
     Err(String),
 }
 
+/// 097 模型弹窗「自动获取支持的模型名」（按商缓存：Ready/Running 命中
+/// 同商不重拉）。目录只进弹窗候选不合并账本——账本合并是刷新钮/测速
+/// 的活；点选候选只填模型ID输入框，自定义手输始终可用。
+#[derive(Debug, Clone)]
+pub(crate) enum MjNamesState {
+    Running { provider: String },
+    Ready {
+        provider: String,
+        names: Vec<String>,
+    },
+    Err {
+        provider: String,
+        error: String,
+    },
+}
+
 /// 042 M2 models.dev 目录拉取状态（「填入模型信息」按钮与结果行）。
 #[derive(Debug, Clone)]
 pub(crate) enum MjCatalogState {

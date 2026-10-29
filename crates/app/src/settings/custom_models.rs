@@ -90,6 +90,121 @@ impl Chat {
                 cx.notify();
             });
         }
+        // 097：打开模型弹窗（mj:m:）即自动拉取该商支持的模型名——同商已有
+        // 在途/结果则复用不重拉（mj_fetch_names 自己判缓存）
+        if section.starts_with("mj:m:") {
+            self.mj_fetch_names(name, cx);
+        }
+    }
+
+    /// 自动获取该商支持的模型名（097 添加模型）：按已保存条目打一次列模型
+    /// GET，名字只进弹窗候选（点选填入模型ID输入框），不合并账本——账本
+    /// 合并仍是刷新钮/测速的活；自定义手输始终可用。
+    pub(crate) fn mj_fetch_names(&mut self, provider: String, cx: &mut Context<Self>) {
+        // 按商缓存：同商已在拉/已拉到 → 复用不重拉
+        if matches!(
+            &self.cfg.mj_names,
+            Some(MjNamesState::Running { provider: p } | MjNamesState::Ready { provider: p, .. })
+                if *p == provider
+        ) {
+            return;
+        }
+        let names_err = |c: &mut Self, msg: String, cx: &mut Context<Self>| {
+            c.cfg.mj_names = Some(MjNamesState::Err {
+                provider: provider.clone(),
+                error: msg,
+            });
+            cx.notify();
+        };
+        let Some(entry) =
+            pi_link::models_json::provider_entry(&self.cfg.mc_models_json, &provider).cloned()
+        else {
+            return;
+        };
+        let base = entry
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let api = entry
+            .get("api")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| pi_link::probe::infer_api(&base).to_string());
+        let key_text = entry
+            .get("apiKey")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let Some((url, auth)) = pi_link::probe::custom_target(&base, &api) else {
+            return names_err(self, tr("models.import_base_url_required").to_string(), cx);
+        };
+        let key = match Self::mj_form_key(&key_text) {
+            Ok(k) => k,
+            Err(e) => return names_err(self, e, cx),
+        };
+        let compat = pi_link::probe::anthropic_compat_urls(&base);
+        self.cfg.mj_names = Some(MjNamesState::Running {
+            provider: provider.clone(),
+        });
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move {
+                    match compat {
+                        Some((models, messages)) => {
+                            pi_link::probe::probe_anthropic_compat(&models, &messages, &key)
+                        }
+                        None => pi_link::probe::probe(&url, auth, &key),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |c, cx| {
+                c.cfg.mj_names = Some(match outcome {
+                    pi_link::probe::ProbeOutcome::Ok { catalog, .. } => {
+                        let mut seen = std::collections::HashSet::new();
+                        let names: Vec<String> = catalog
+                            .into_iter()
+                            .map(|m| m.id)
+                            .filter(|id| seen.insert(id.clone()))
+                            .collect();
+                        MjNamesState::Ready { provider, names }
+                    }
+                    pi_link::probe::ProbeOutcome::AuthRejected { status } => MjNamesState::Err {
+                        provider,
+                        error: crate::i18n::tf(
+                            "extensions.fetch_key_rejected",
+                            &[("s", status.to_string())],
+                        ),
+                    },
+                    pi_link::probe::ProbeOutcome::Unreachable { error } => MjNamesState::Err {
+                        provider,
+                        error: crate::i18n::tf("extensions.fetch_failed", &[("e", error)]),
+                    },
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 弹窗候选名重拉（清缓存后重取）。
+    pub(crate) fn mj_refetch_names(&mut self, provider: String, cx: &mut Context<Self>) {
+        self.cfg.mj_names = None;
+        self.mj_fetch_names(provider, cx);
+    }
+
+    /// 点选候选名 → 填入模型ID输入框（仍可再手改，自定义模型不受影响）。
+    pub(crate) fn mj_pick_name(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(st) = self.dlg.settings.clone() {
+            st.update(cx, |s, cx| {
+                s.mj_id.update(cx, |ti, cx| ti.set_value(id.clone(), cx));
+                cx.notify();
+            });
+        }
+        cx.notify();
     }
 
     /// Skills toggle: write `disable-model-invocation` into SKILL.md
@@ -1409,6 +1524,9 @@ pub(crate) fn mj_model_modal_overlay(
                         }),
                 ),
         )
+        // 097：自动获取的模型名候选（点选填入上方模型ID，可再手改/手输）；
+        // Running/Err 行 + 重拉钮；候选只在弹窗内，不碰账本
+        .child(mj_names_section(chat, &weak, &name))
         // 上下文窗口 / 最大输出
         .child(
             div()
@@ -1481,6 +1599,110 @@ pub(crate) fn mj_model_modal_overlay(
                 .child(div().flex_1().min_h_0().flex().child(detail)),
         ));
     Some(overlay.into_any_element())
+}
+
+/// 模型弹窗的「自动获取模型名」候选区（097）：标题 + 重拉钮；Running/Err
+/// 走提示行，Ready 走可点 vlist（点选 = 填入模型ID输入框，可再手改）。
+/// 只有当前表单商与拉取态商一致才渲染（避免换商瞬时串数据）。
+fn mj_names_section(
+    chat: &Chat,
+    weak: &gpui::WeakEntity<Chat>,
+    provider: &str,
+) -> gpui::AnyElement {
+    let t = T();
+    let Some(state) = &chat.cfg.mj_names else {
+        return div().into_any_element();
+    };
+    let same = match state {
+        MjNamesState::Running { provider: p }
+        | MjNamesState::Ready { provider: p, .. }
+        | MjNamesState::Err { provider: p, .. } => p == provider,
+    };
+    if !same {
+        return div().into_any_element();
+    }
+    let section = div()
+        .flex()
+        .flex_col()
+        .gap(px(5.))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(section_title(&tr("models.names_title")))
+                .child(div().flex_1())
+                .child({
+                    let weak_ref = weak.clone();
+                    let n = provider.to_string();
+                    crate::ui::button(
+                        "mj-names-retry",
+                        tr("models.names_retry"),
+                        crate::ui::BtnSize::Sm,
+                        crate::ui::button::BtnVariant::Secondary,
+                        matches!(state, MjNamesState::Running { .. }),
+                        move |_, _, cx| {
+                            let _ = weak_ref.update(cx, |c, cx| c.mj_refetch_names(n.clone(), cx));
+                        },
+                    )
+                }),
+        );
+    match state {
+        MjNamesState::Running { .. } => section.child(note(&tr("models.names_fetching"))),
+        MjNamesState::Err { error, .. } => section.child(error_note(error)),
+        MjNamesState::Ready { names, .. } => {
+            if names.is_empty() {
+                return section.child(note(&tr("models.names_empty"))).into_any_element();
+            }
+            let row_h = (f32::from(crate::appearance::ui_size(11.))
+                + f32::from(crate::appearance::ui_size(10.)))
+                * 1.25
+                + 8.;
+            let names_owned = names.clone();
+            let weak = weak.clone();
+            let list = vlist(
+                "mj-names-list",
+                names_owned.len(),
+                row_h,
+                VListHeight::Capped(160.),
+                true,
+                true,
+                "models.no_matching_models",
+                None,
+                move |ix, _window, _cx| {
+                    let id = names_owned[ix].clone();
+                    let weak_pick = weak.clone();
+                    div()
+                        .id(SharedString::from(format!("mj-name-{ix}")))
+                        .w_full()
+                        .h(px(row_h))
+                        .px(px(12.))
+                        .flex()
+                        .items_center()
+                        .cursor_pointer()
+                        .hover(|s| s.bg(rgb(t.bg_hover)))
+                        .when(ix > 0, |dd| dd.border_t_1().border_color(rgb(t.border)))
+                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            let _ = weak_pick.update(cx, |c, cx| c.mj_pick_name(id.clone(), cx));
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(crate::appearance::ui_size(11.))
+                                .line_height(gpui::relative(1.25))
+                                .text_color(rgb(t.text))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .child(SharedString::from(names_owned[ix].clone())),
+                        )
+                        .into_any_element()
+                },
+            );
+            section.child(list)
+        }
+    }
+    .into_any_element()
 }
 
 /// 能力勾选项（checkbox §5.4：14、r3、勾 10 = accent_contrast；视觉同

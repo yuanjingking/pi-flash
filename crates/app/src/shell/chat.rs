@@ -6,7 +6,7 @@
 
 use crate::function_panel::{HoverCard, ProjCard, TreeEdit, TreeMenu};
 use crate::session::input::{AtFilterCache, AtIndexState};
-use crate::settings::models::{McProbe, MjCatalogState, MjSpeedState, MjTestState};
+use crate::settings::models::{McProbe, MjCatalogState, MjNamesState, MjSpeedState, MjTestState};
 use crate::settings::pi_extensions::PkgOp;
 use crate::*;
 
@@ -107,6 +107,8 @@ pub(crate) struct CfgUi {
         Option<std::sync::Arc<Vec<pi_link::models_dev::CatalogEntry>>>,
     /// 042 M2 models.dev 拉取状态（按钮文案与结果行）
     pub(crate) mj_models_dev_state: MjCatalogState,
+    /// 097 模型弹窗「自动获取支持的模型名」候选（按商缓存）
+    pub(crate) mj_names: Option<MjNamesState>,
     /// 042 新增 Provider 弹窗的全量注册表（registry.rs dump；None = 未加载）
     pub(crate) provider_registry: Option<std::sync::Arc<pi_link::registry::RegistryDump>>,
     /// dump 拉取状态（Idle = 待拉/可拉，Loading = 后台进行中，Failed = 上次失败）
@@ -771,6 +773,7 @@ impl Chat {
                 mj_test: None,
                 mj_models_dev: None,
                 mj_models_dev_state: MjCatalogState::Idle,
+                mj_names: None,
                 provider_registry: None,
                 registry_state: crate::session::model_picker::RegistryState::Idle,
                 mc_remove_confirm: None,

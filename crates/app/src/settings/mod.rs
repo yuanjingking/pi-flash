@@ -17,7 +17,7 @@ pub(crate) mod shortcuts;
 pub(crate) mod skills;
 pub(crate) mod widgets;
 
-pub(crate) use models::{MjCatalogState, MjSpeedState, MjTestState};
+pub(crate) use models::{MjCatalogState, MjNamesState, MjSpeedState, MjTestState};
 
 use general::mc_general_view;
 use misc::mc_misc_view;
