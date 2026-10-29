@@ -61,9 +61,7 @@ impl Chat {
                 let key_display = match pi_link::credentials::classify(&key_raw) {
                     pi_link::credentials::StoreMode::Vault => {
                         pi_link::credentials::pf_ref(&key_raw)
-                            .and_then(|v| {
-                                pi_link::credentials::KeyringVault.get(v).ok().flatten()
-                            })
+                            .and_then(|v| pi_link::credentials::KeyringVault.get(v).ok().flatten())
                             .unwrap_or(key_raw)
                     }
                     _ => key_raw,
@@ -94,6 +92,21 @@ impl Chat {
         // 在途/结果则复用不重拉（mj_fetch_names 自己判缓存）
         if section.starts_with("mj:m:") {
             self.mj_fetch_names(name, cx);
+        } else if section.starts_with("mj:p:") {
+            // m00236：打开自定义商详情页自动获取可用模型——限已存条目
+            // （有 baseUrl）且账本内尚无该商模型时后台拉一次；已有条目不
+            // 重拉（重拉归刷新钮），新商未保存时无 baseUrl 不拉
+            let saved_base = pi_link::models_json::provider_entry(&self.cfg.mc_models_json, &name)
+                .and_then(|e| e.get("baseUrl"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.trim().is_empty());
+            let empty = pi_link::models_json::provider_entry(&self.cfg.mc_models_json, &name)
+                .map(pi_link::models_json::provider_models)
+                .unwrap_or_default()
+                .is_empty();
+            if saved_base && empty {
+                self.mj_fetch_models(name, cx);
+            }
         }
     }
 
@@ -342,8 +355,7 @@ impl Chat {
         // API 形状 PF 推断（042-1 改版：baseUrl 决定协议，用户零选择）。
         // pi 对缺 api 硬 throw，必须写具体值；空 base 先落 openai 形状，
         // 填好 base 再保存即随推断更新
-        entry["api"] =
-            serde_json::Value::String(pi_link::probe::infer_api(&base).to_string());
+        entry["api"] = serde_json::Value::String(pi_link::probe::infer_api(&base).to_string());
         // name 字段随输入同步（顺带保证新建条目 sanitize 不丢）
         set_opt_str(&mut entry, "name", &name);
         // 尾斜杠规范化（pi 运行时直接拼 base+path，避免 /key//path）；
@@ -526,9 +538,7 @@ impl Chat {
         match pi_link::credentials::classify(key_text) {
             pi_link::credentials::StoreMode::File => Ok(key_text.to_string()),
             pi_link::credentials::StoreMode::Vault => pi_link::credentials::pf_ref(key_text)
-                .and_then(|v| {
-                    pi_link::credentials::KeyringVault.get(&v).ok().flatten()
-                })
+                .and_then(|v| pi_link::credentials::KeyringVault.get(&v).ok().flatten())
                 .ok_or_else(|| tr("model.key_not_in_vault").to_string()),
             pi_link::credentials::StoreMode::Ref => {
                 Err(tr("models.adv_ref_unresolved").to_string())
@@ -581,7 +591,9 @@ impl Chat {
             let _ = this.update(cx, |c, cx| {
                 match outcome {
                     pi_link::probe::ProbeOutcome::Ok {
-                        catalog, latency_ms, ..
+                        catalog,
+                        latency_ms,
+                        ..
                     } => {
                         // 1、自动保存（表单全字段 + 头行输入框可能的改名）
                         if let Some(st) = c.dlg.settings.clone() {
@@ -735,17 +747,15 @@ impl Chat {
         let api = pi_link::probe::infer_api(&base).to_string();
         // provider 级 headers 从缓冲合并（模型级 headers 随编辑器精简退场，
         // 既有条目的 model.headers 原样保留不碰）
-        let headers: Vec<(String, String)> = pi_link::models_json::provider_entry(
-            &self.cfg.mc_models_json,
-            &provider,
-        )
-        .and_then(|e| e.get("headers").and_then(|h| h.as_object()))
-        .map(|o| {
-            o.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+        let headers: Vec<(String, String)> =
+            pi_link::models_json::provider_entry(&self.cfg.mc_models_json, &provider)
+                .and_then(|e| e.get("headers").and_then(|h| h.as_object()))
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
         self.mc_clear_error(cx);
         if model_id.is_empty() {
             return self.mc_set_error(tr("custom_models.model_id_required"), cx);
@@ -766,13 +776,15 @@ impl Chat {
                 .await;
             let _ = this.update(cx, |c, cx| {
                 c.cfg.mj_test = Some(match outcome {
-                    pi_link::model_test::TestOutcome::Ok { latency_ms, status, text } => {
-                        MjTestState::Ok {
-                            latency_ms,
-                            status,
-                            text,
-                        }
-                    }
+                    pi_link::model_test::TestOutcome::Ok {
+                        latency_ms,
+                        status,
+                        text,
+                    } => MjTestState::Ok {
+                        latency_ms,
+                        status,
+                        text,
+                    },
                     pi_link::model_test::TestOutcome::Err { message, .. } => {
                         MjTestState::Err(message)
                     }
@@ -836,19 +848,11 @@ impl Chat {
         if query.is_empty() {
             return self.mc_set_error(tr("custom_models.model_id_required"), cx);
         }
-        let base_url = entry
-            .get("baseUrl")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let base_url = entry.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
         let rec = pi_link::models_dev::recommend(&entries, query, provider, base_url);
         let mut model = model;
         let applied = pi_link::models_dev::fill_empty(&mut model, &rec.preset);
-        pi_link::models_json::update_model(
-            &mut self.cfg.mc_models_json,
-            provider,
-            ix,
-            model,
-        );
+        pi_link::models_json::update_model(&mut self.cfg.mc_models_json, provider, ix, model);
         self.mj_flush(cx);
         let note = mj_price_note(&rec.price);
         self.cfg.mj_models_dev_state = MjCatalogState::Done { applied, note };
@@ -864,9 +868,13 @@ impl Chat {
 fn mj_price_note(price: &Option<pi_link::models_dev::Price>) -> String {
     match price {
         Some(pi_link::models_dev::Price::Reliable { method, .. }) => match method {
-            pi_link::models_dev::MatchMethod::Provider => tr("models.catalog_price_provider").into(),
+            pi_link::models_dev::MatchMethod::Provider => {
+                tr("models.catalog_price_provider").into()
+            }
             pi_link::models_dev::MatchMethod::BaseUrl => tr("models.catalog_price_baseurl").into(),
-            pi_link::models_dev::MatchMethod::Consensus => tr("models.catalog_price_consensus").into(),
+            pi_link::models_dev::MatchMethod::Consensus => {
+                tr("models.catalog_price_consensus").into()
+            }
         },
         Some(pi_link::models_dev::Price::Unreliable { reason, .. }) => match *reason {
             "no-exact-match" => tr("models.catalog_no_exact_match").into(),
@@ -981,45 +989,44 @@ pub(crate) fn mj_provider_editor(
 
     // API Key 行：控件全宽（右缘眼睛，掩码显隐已存 key）；保存钮在操作栏
     let weak_eye = weak.clone();
-    let detail = detail
-        .child(form_row(
-            "API Key",
-            div()
-                .relative()
-                .w_full()
-                .child(d.mj_key.clone())
-                .child(
-                    div()
-                        .id("mj-key-eye")
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right(px(8.))
-                        .flex()
-                        .items_center()
-                        .cursor_pointer()
-                        .hover(|s| s.opacity(0.7))
-                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                            let _ = weak_eye.update(cx, |c, cx| {
-                                if let Some(st) = c.dlg.settings.clone() {
-                                    let input = st.read(cx).mj_key.clone();
-                                    let visible = st.update(cx, |s, cx| {
-                                        s.mj_key_visible = !s.mj_key_visible;
-                                        cx.notify();
-                                        s.mj_key_visible
-                                    });
-                                    input.update(cx, |ti, cx| ti.set_masked(!visible, cx));
-                                }
-                            });
-                        })
-                        .child(crate::ui::icon(
-                            if d.mj_key_visible { "eye-off" } else { "eye" },
-                            14.,
-                            t.text_muted,
-                        )),
-                )
-                .into_any_element(),
-        ));
+    let detail = detail.child(form_row(
+        "API Key",
+        div()
+            .relative()
+            .w_full()
+            .child(d.mj_key.clone())
+            .child(
+                div()
+                    .id("mj-key-eye")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right(px(8.))
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .hover(|s| s.opacity(0.7))
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        let _ = weak_eye.update(cx, |c, cx| {
+                            if let Some(st) = c.dlg.settings.clone() {
+                                let input = st.read(cx).mj_key.clone();
+                                let visible = st.update(cx, |s, cx| {
+                                    s.mj_key_visible = !s.mj_key_visible;
+                                    cx.notify();
+                                    s.mj_key_visible
+                                });
+                                input.update(cx, |ti, cx| ti.set_masked(!visible, cx));
+                            }
+                        });
+                    })
+                    .child(crate::ui::icon(
+                        if d.mj_key_visible { "eye-off" } else { "eye" },
+                        14.,
+                        t.text_muted,
+                    )),
+            )
+            .into_any_element(),
+    ));
 
     // Base URL 行（全宽）。API 类型已下线（042-1 改版）：形状由 baseUrl
     // 推断落盘，用户零选择；误判走模型编辑器的 API 覆盖逃生门
@@ -1068,7 +1075,9 @@ pub(crate) fn mj_provider_editor(
                     weak,
                     &format!("+ {}", tr("settings.tab.models")),
                     crate::ui::button::BtnVariant::Secondary,
-                    !edit_ok,
+                    // m00236：不限测速状态——手动添加/改删模型随时可用
+                    //（模型编辑器只写 model 四键，不依赖连通性）
+                    false,
                     {
                         let n = name.to_string();
                         move |c, cx| c.mj_add_model(n.clone(), cx)
@@ -1097,16 +1106,13 @@ pub(crate) fn mj_provider_editor(
         })
         // 注释行用 faint 弱化（比 note 再小一号 + 降透明），不抢操作栏视线
         .child(
-            div()
-                .opacity(0.7)
-                .child(
-                    div()
-                        .text_size(crate::appearance::ui_size(10.))
-                        .text_color(rgb(t.text_dim))
-                        .child(SharedString::from(tr("models.speed_note").to_string())),
-                ),
+            div().opacity(0.7).child(
+                div()
+                    .text_size(crate::appearance::ui_size(10.))
+                    .text_color(rgb(t.text_dim))
+                    .child(SharedString::from(tr("models.speed_note").to_string())),
+            ),
         );
-
 
     // API 段与可用模型区之间的分隔线（内置详情同款）
     let detail = detail.child(
@@ -1401,7 +1407,11 @@ pub(crate) fn mj_model_modal_overlay(
     let testing = matches!(test_state, Some(MjTestState::Running));
     let test_note: Option<(String, bool)> = match &test_state {
         Some(MjTestState::Running) => Some((tr("models.test_running").to_string(), false)),
-        Some(MjTestState::Ok { latency_ms, status, text }) => Some((
+        Some(MjTestState::Ok {
+            latency_ms,
+            status,
+            text,
+        }) => Some((
             crate::i18n::tf(
                 "models.test_passed",
                 &[
@@ -1465,20 +1475,19 @@ pub(crate) fn mj_model_modal_overlay(
                 )),
         )
         .children(error.as_ref().map(|e| error_note(e)))
-        .children(test_note.as_ref().map(|(text, ok)| {
-            if *ok {
-                note(text)
-            } else {
-                error_note(text)
-            }
-        }))
+        .children(test_note.as_ref().map(
+            |(text, ok)| {
+                if *ok { note(text) } else { error_note(text) }
+            },
+        ))
         .children(match &chat.cfg.mj_models_dev_state {
             MjCatalogState::Running => vec![note(&tr("models.catalog_filling"))],
-            MjCatalogState::Done { applied, note: price_note } => {
-                let mut msg = crate::i18n::tf(
-                    "models.catalog_filled",
-                    &[("count", applied.to_string())],
-                );
+            MjCatalogState::Done {
+                applied,
+                note: price_note,
+            } => {
+                let mut msg =
+                    crate::i18n::tf("models.catalog_filled", &[("count", applied.to_string())]);
                 if !price_note.is_empty() {
                     msg.push_str(&format!(" · {price_note}"));
                 }
@@ -1516,9 +1525,8 @@ pub(crate) fn mj_model_modal_overlay(
                                 crate::ui::BtnVariant::Secondary,
                                 matches!(chat.cfg.mj_models_dev_state, MjCatalogState::Running),
                                 move |_, _, cx| {
-                                    let _ = weak_fill.update(cx, |c, cx| {
-                                        c.mj_catalog_fill(n.clone(), ix, cx)
-                                    });
+                                    let _ = weak_fill
+                                        .update(cx, |c, cx| c.mj_catalog_fill(n.clone(), ix, cx));
                                 },
                             )
                         }),
@@ -1557,12 +1565,7 @@ pub(crate) fn mj_model_modal_overlay(
                         .flex()
                         .items_center()
                         .gap(px(16.))
-                        .child(mj_cap_checkbox(
-                            &tr("models.cap_text"),
-                            true,
-                            &weak,
-                            None,
-                        ))
+                        .child(mj_cap_checkbox(&tr("models.cap_text"), true, &weak, None))
                         .child(mj_cap_checkbox(
                             &tr("models.cap_image"),
                             d.mj_image,
@@ -1621,38 +1624,36 @@ fn mj_names_section(
     if !same {
         return div().into_any_element();
     }
-    let section = div()
-        .flex()
-        .flex_col()
-        .gap(px(5.))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(section_title(&tr("models.names_title")))
-                .child(div().flex_1())
-                .child({
-                    let weak_ref = weak.clone();
-                    let n = provider.to_string();
-                    crate::ui::button(
-                        "mj-names-retry",
-                        tr("models.names_retry"),
-                        crate::ui::BtnSize::Sm,
-                        crate::ui::button::BtnVariant::Secondary,
-                        matches!(state, MjNamesState::Running { .. }),
-                        move |_, _, cx| {
-                            let _ = weak_ref.update(cx, |c, cx| c.mj_refetch_names(n.clone(), cx));
-                        },
-                    )
-                }),
-        );
+    let section = div().flex().flex_col().gap(px(5.)).child(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(section_title(&tr("models.names_title")))
+            .child(div().flex_1())
+            .child({
+                let weak_ref = weak.clone();
+                let n = provider.to_string();
+                crate::ui::button(
+                    "mj-names-retry",
+                    tr("models.names_retry"),
+                    crate::ui::BtnSize::Sm,
+                    crate::ui::button::BtnVariant::Secondary,
+                    matches!(state, MjNamesState::Running { .. }),
+                    move |_, _, cx| {
+                        let _ = weak_ref.update(cx, |c, cx| c.mj_refetch_names(n.clone(), cx));
+                    },
+                )
+            }),
+    );
     match state {
         MjNamesState::Running { .. } => section.child(note(&tr("models.names_fetching"))),
         MjNamesState::Err { error, .. } => section.child(error_note(error)),
         MjNamesState::Ready { names, .. } => {
             if names.is_empty() {
-                return section.child(note(&tr("models.names_empty"))).into_any_element();
+                return section
+                    .child(note(&tr("models.names_empty")))
+                    .into_any_element();
             }
             let row_h = (f32::from(crate::appearance::ui_size(11.))
                 + f32::from(crate::appearance::ui_size(10.)))
@@ -1741,11 +1742,7 @@ fn mj_cap_checkbox(
         .child(
             div()
                 .text_size(crate::appearance::ui_size(11.))
-                .text_color(rgb(if toggle.is_none() {
-                    t.text_dim
-                } else {
-                    t.text
-                }))
+                .text_color(rgb(if toggle.is_none() { t.text_dim } else { t.text }))
                 .child(SharedString::from(label.to_string())),
         );
     if let Some(toggle) = toggle {
