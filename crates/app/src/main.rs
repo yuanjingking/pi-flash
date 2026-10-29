@@ -50,6 +50,7 @@ mod terminal;
 mod titlebar;
 mod top_panels;
 mod ui;
+mod usage;
 pub(crate) use session::menu::slash_menu_view;
 pub(crate) use shell::chat::Chat;
 pub(crate) use shell::types::*;

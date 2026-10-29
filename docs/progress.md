@@ -430,3 +430,22 @@
   另修「证明钩子只在后台验签线程注入 → 面板先 init 读 fallback 拒载」的竞态
 - 实测：市场装 `quick-panel@0.1.4` → 验签通过（装载 3.2s/init 2.7ms，缓存命中毫秒级）
   → tab 闪电图标 → 面板分区/图标/色调与 JS 版一致 → 右键「设为快捷」写收藏可用
+
+## 091 会话用量展示与每日×每模型明细（2026-10-29）
+- **pi-link `usage_stats`**：后台扫描全部会话 JSONL，按 (本地日期, provider,
+  model, 会话文件) 分桶聚合；`usage-stats.json` 指纹缓存增量续读（mtime+size
+  命中复用、变长按字节偏移续读、CACHE_VERSION=2）；同消息重复 usage entry
+  只计一次；缓存命中率口径与 `SessionStats::cache_hit_rate` 同式
+- **会话底部累计条**：composer 包装层 absolute 定位居中（不占布局），显示
+  ↑输入 ↓输出 · 缓存 · $费用，点击开统计页；数据 = RPC get_session_stats
+  （轮末自动刷新），零额外 IO
+- **每轮消耗行**：assistant 轮末常显「本次 ↑x ↓y · 缓存 · $cost」——整轮全部
+  assistant 消息 usage 求和（推翻旧「只取末条」：一轮多工具调用会漏账）
+- **统计页**（Dialog::UsageStats，big_card 大卡）：四格汇总条 + 搜索行
+  （日期/模型关键词过滤，OR 口径，过滤重算汇总/复位滚动）+ 每日卡片；
+  **明细行可点击跳会话**（open_session_detached 唤醒 + switch_to 切注意力）
+- 测试：pi-link 5 passed（含 duplicate_usage_entries_count_once）、app 4 passed；
+  `python scripts/check_ui_raw.py` 零新增（usage 文件走 ui-raw: ok 逃生阀
+  并已注明理由）；顺手修 check_ui_raw.py：注释行不再打断链/吞逃生阀（原来
+  链内注释会把 ui-raw: ok 判失效）
+- 文档：`docs/模块设计/085-用量统计.md`

@@ -65,6 +65,9 @@ pub(crate) fn render_dialogs(
             *kind, chat, weak, t, cx,
         ));
     }
+    if let Some(Dialog::UsageStats) = chat.dlg.dialog.as_ref() {
+        root = root.child(crate::usage::usage_stats_dialog(chat, weak, t));
+    }
     if let Some(Dialog::FileDirty { paths }) = chat.dlg.dialog.as_ref() {
         root = root.child(render_file_dirty(chat, weak, paths, t));
     }

@@ -268,7 +268,10 @@ pub(crate) fn input_area(
                     .child(capsule),
             ),
         );
-    composer_wrap(inner, hero, show_scroll_btn, weak, t)
+    // 091 会话底部用量条：当前会话累计 token/缓存/费用（点击开统计弹窗）。
+    // 在胶囊之外单独绝对定位——不能塞进胶囊那一列，否则底边锚点会被抬高。
+    let footer = crate::usage::session_footer(chat, weak, t, cx);
+    composer_wrap(inner, hero, show_scroll_btn, footer, weak, t)
 }
 
 /// 附加图片缩略图（v58 图片粘贴）：56×56 圆角方块，panel 左上角并列、
@@ -489,6 +492,7 @@ fn composer_wrap(
     inner: gpui::Div,
     hero: bool,
     show_scroll_btn: bool,
+    footer: Option<gpui::AnyElement>,
     weak: &gpui::WeakEntity<Chat>,
     t: &'static crate::appearance::theme::Theme,
 ) -> gpui::AnyElement {
@@ -501,7 +505,7 @@ fn composer_wrap(
             .child(inner)
             .into_any_element();
     }
-    div()
+    let mut wrap = div()
         .id("composer-wrap")
         .relative()
         .h(px(0.))
@@ -524,8 +528,22 @@ fn composer_wrap(
                     d.child(crate::session::scroll_to_bottom_button(weak, t))
                 })
                 .child(inner),
-        )
-        .into_any_element()
+        );
+    // 底缘 2px 的一行用量（绝对定位在胶囊之下，不占布局、不动胶囊位置）
+    if let Some(footer) = footer {
+        wrap = wrap.child(
+            div()
+                .absolute()
+                .bottom(px(2.))
+                .left_0()
+                .right_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(footer),
+        );
+    }
+    wrap.into_any_element()
 }
 
 /// 惰性创建 composer 输入组件（InputState 构造需要 &mut Window，挂在渲染

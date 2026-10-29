@@ -50,6 +50,12 @@ def chains(path):
     out, cur = [], []
     for i, line in enumerate(lines):
         text = line.strip()
+        # 注释行不参与链判断，也不打断链——逃生阀（ui-raw: ok）写在链内
+        # 注释上是规范姿势，链头上的文档注释更不该被吞进链体
+        if text.startswith('//') or text.startswith('///'):
+            if cur:
+                cur.append((i + 1, line))
+            continue
         if not cur:
             if HEAD.search(text):
                 cur = [(i + 1, line)]

@@ -231,6 +231,12 @@ pub fn provider_catalog_file() -> Option<PathBuf> {
     file("provider-catalog.json")
 }
 
+/// `~/.pi-flash/usage-stats.json` — 用量统计增量缓存（091：按「本地日期 ×
+/// 模型」聚合的会话 usage，指纹失效时从上次字节偏移续读）。
+pub fn usage_stats_cache_file() -> Option<PathBuf> {
+    file("usage-stats.json")
+}
+
 /// `~/.pi-flash/session-ext.json` — 会话级插件清单（自定义档：每个对话保存一份）。
 pub fn session_ext_file() -> Option<PathBuf> {
     file("session-ext.json")

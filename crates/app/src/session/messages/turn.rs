@@ -1062,6 +1062,11 @@ pub(crate) fn render_assistant_turn(
     if let Some(chips) = written_files_chips(start_ix, weak, &written, t) {
         col = col.child(chips);
     }
+    // 091 本轮消耗行（常显）：这一轮全部模型调用的 input/output/缓存/费用合计
+    // ——旧实现只取末条（pi-web omitUsage parity），用户要的是「当次」总共花了多少
+    if let Some(line) = crate::usage::turn_usage_line(turn, t) {
+        col = col.child(line);
+    }
     col = col.child(actions_bar::assistant_action_bar(
         start_ix,
         weak,

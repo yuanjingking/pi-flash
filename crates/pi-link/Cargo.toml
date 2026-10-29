@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 # 面板里的提示词就不是 pi 实际发送的那份了。
 serde_json = { version = "1", features = ["unbounded_depth", "preserve_order"] }
 futures = "0.3"
+# 用量统计（091）：会话日志的 UTC→本地日期分桶（用户视角的「每天」）
+chrono = "0.4"
 # OS 凭据库（051-apikey管理.md）：明文只进 Credential Manager / Keychain
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 # 042 通路探查：阻塞式轻量 HTTP（rustls，不走系统 OpenSSL）

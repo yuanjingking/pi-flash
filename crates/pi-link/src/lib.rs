@@ -38,6 +38,7 @@ pub mod skills;
 pub mod subagent_catalog;
 pub mod subagents;
 pub mod transcript;
+pub mod usage_stats;
 pub mod vendor;
 
 /// Vendored pi version this crate's types/tests are written against.
