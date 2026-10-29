@@ -28,6 +28,9 @@ use super::*;
 /// than the truncated RPC snapshot to win the length contest, and the RPC
 /// path already renders the full (broken) chain — same render scale
 const LEAF_REPAIR_MAX: usize = usize::MAX;
+/// 回答默认中文（m00232）：随每次 spawn 挂 `--append-system-prompt`，
+/// 用户首条 prompt 若用其他语言点名，模型自会跟随（追加式不压用户指令）
+const REPLY_LANG_ZH: &str = "请始终使用简体中文回答用户的问题与说明（代码、命令、标识符、专有名词除外；用户明确要求使用其他语言时除外）。";
 use crate::i18n::tr;
 use crate::services::format::status_line;
 
@@ -444,6 +447,10 @@ impl SessionRuntime {
             extra.push("--thinking".into());
             extra.push(level);
         }
+        // 回答默认中文（m00232）：随 spawn 挂追加式系统提示，不落 pi
+        // 配置文件（不抢用户 `~/.pi` 的全局指令文件）；重复挂无害
+        extra.push("--append-system-prompt".into());
+        extra.push(REPLY_LANG_ZH.into());
         self.agent.spawn_with(&self.cwd, &extra)
     }
 
@@ -532,7 +539,14 @@ impl SessionRuntime {
                 true
             }
             None => {
-                self.status = tr("status.disconnected").into();
+                // 真因优先（如「vendored pi not found — run `npm ci`」）：
+                // 只显示「未连接」会让用户以为网络问题，病囡全在 stderr 里
+                self.status = self
+                    .agent
+                    .last_error
+                    .take()
+                    .unwrap_or_else(|| tr("status.disconnected").to_string())
+                    .into();
                 cx.notify();
                 false
             }
