@@ -449,3 +449,31 @@
   并已注明理由）；顺手修 check_ui_raw.py：注释行不再打断链/吞逃生阀（原来
   链内注释会把 ui-raw: ok 判失效）
 - 文档：`docs/模块设计/085-用量统计.md`
+
+## 092 消息划选二期——用户气泡可划选复制（2026-10-29）
+- **用户消息气泡换 selectable TextView**（`UserBubbleText`，textview.rs）：
+  与 agent 定稿块同款 RenderOnce 包装，气泡内文字现在可鼠标划选 + Ctrl+C
+  复制，与 agent 回复划选共享同一条全局选区链（LastSelectionOwner 全窗
+  单一，跨块划选自然覆盖消歧）；技能展开折叠（skill_open 分支）与普通
+  气泡两条路径都走它
+- **原文凭证语义自保**（`escape_lt`）：自研渲染器 `render_user`
+  （html=false）把 HTML 标签原样显示（`user_mode_shows_html_literals`
+  测试锁死）——用户消息是发出内容的凭证，换 vendor 解析器不能吞标签。
+  上屏前只转义**起手是 `<` 的行/块级标签**：代码围栏内原样、`&` 开头的
+  实体不重复转义、行内普通 `<`（比较符 `a < b`）不动——画出来的文字与
+  原始文本逐字节一致，划选取到的也是原文。行内裸标签（`a <b>x</b>`）
+  是 vendor 解析器已知边界，留实测验证（提交说明注明）
+- id = `ub-{msg_ix}-{hash:#x}#{theme}`，与 agent 块 `tv-` 前缀隔离；
+  哈希防 use_keyed_state 同位串树、主题名防 CodeBlock 高亮盘滞留
+  （issue#4 同款）
+- 流式块维持一期定夺**不换**：TextView 文本变更是 200ms 防抖后台重解析，
+  会拖慢流式显示（`textview.rs` 文件头注释留档，待用户裁决是否翻案）
+- 顺手修 HEAD 编译错误：`agent_session.rs` 补 `last_error` 字段——117447d
+  （回答默认中文）只改了 `runtime/mod.rs` 消费 `.last_error`，漏了配套
+  字段定义，仓库裸 HEAD 编译不过（本任务第一次 `cargo check` 才撞见）
+- 测试：`textview::tests` 2 passed（escapes_block_leading_tags_only /
+  fences_and_entities_kept_verbatim），`session::messages` 全套 15 passed，
+  全量 app 测试 407 passed（跳过 2 个与本任务无关的既有失败
+  `models_config::last_model_guard` / `provider_toggle_and_pins_survive_expansion`
+  ——HEAD 裸树上同样失败，d3a5c54 删守卫时漏删断言）
+- 文档：`docs/模块设计/032-会话消息面板.md` 增补划选二期小节

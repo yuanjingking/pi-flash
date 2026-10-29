@@ -13,6 +13,11 @@ use pi_link::protocol::Event;
 pub(crate) struct AgentSession {
     pub session: Option<PiSession>,
     pub epoch: u64,
+    /// 上一次 spawn 失败的真因（如 vendored pi 未安装）。spawn 失败时 UI
+    /// 只显示「未连接」会把病因全埋进 stderr——用户侧表现为「点发送没反
+    /// 应」，2026-11 踩过一次（vendor/pi/node_modules 被清空）。调用方
+    /// 取走后清空，成功 spawn 也清空。
+    pub last_error: Option<String>,
 }
 
 impl AgentSession {
@@ -20,6 +25,7 @@ impl AgentSession {
         Self {
             session: None,
             epoch,
+            last_error: None,
         }
     }
 
@@ -38,10 +44,12 @@ impl AgentSession {
         match spawn_pi(cwd, &args) {
             Ok((s, ev)) => {
                 self.session = Some(s);
+                self.last_error = None;
                 Some(ev)
             }
             Err(e) => {
                 eprintln!("{e}");
+                self.last_error = Some(e);
                 self.session = None;
                 None
             }

@@ -349,6 +349,13 @@ pub(crate) fn render_msg(
         // 默认折叠：mono 技能名 + 展开箭头 + 参数原文；展开显示全文
         // markdown；复制/编辑目标都是紧凑命令（copyTarget/editTarget parity）
         let command_text = skill_expansion_to_command(&text);
+        // 气泡正文 id 的内容哈希（use_keyed_state 同 id 换文本先画旧内容）
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        };
         let skill_key = m
             .entry_id
             .clone()
@@ -410,11 +417,13 @@ pub(crate) fn render_msg(
                     }),
             );
             if skill_open {
-                stack = stack.child(markdown::render_user(&text, t));
+                let uid = SharedString::from(format!("ub-{msg_ix}-{hash:x}"));
+                stack = stack.child(UserBubbleText::new(uid, text.to_string()));
             }
             stack.into_any_element()
         } else {
-            markdown::render_user(&text, t)
+            let uid = SharedString::from(format!("ub-{msg_ix}-{hash:x}"));
+            UserBubbleText::new(uid, text.to_string()).into_any_element()
         };
 
         let scroll_key = m
