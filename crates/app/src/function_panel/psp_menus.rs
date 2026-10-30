@@ -65,6 +65,21 @@ pub(crate) fn editor_menu_layer(
             || Box::new(gpui_component::input::SelectAll),
         ))
         .child(menu_sep());
+    // 023：跳转到定义（与 Ctrl+Click / F12 同入口；非代码后缀没有符号
+    // 语义 → 用 definition 模块的语言判据过滤，md/json/图片菜单不变）
+    if crate::editor::definition::lang_of(&path).is_some() {
+        card = card.child(editor_item(
+            &weak,
+            "edm-goto-def",
+            "arrow-up-right",
+            tr("editor.goto_definition"),
+            false,
+            {
+                let path = path.clone();
+                move |c, cx| c.goto_definition_in(path.clone(), cx)
+            },
+        ));
+    }
     // 文件动作块：条目与顺序由 kind handler 声明（含分隔线）——默认骨架 =
     // 资源管理器/终端 + 改名/删除；md 源码态带预览项；「在浏览器中打开」
     // 是路径判据（html/htm，同文件树菜单），保留在动作块首位

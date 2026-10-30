@@ -10,12 +10,15 @@
 //! - markdown：Markdown 渲染器（聊天正文 + md 预览），含 render/
 //!   {html,math,mermaid} 富渲染组件
 //!   └─ wysiwyg：Markdown 所见即所得（Live Preview，024 设计）
+//! - definition：跳转到定义（Ctrl+Click / F12 / 右键菜单）——语言感知的
+//!   符号解析，不走 LSP 进程（零配置，2026-10-22）
 //! - file_content：文件字节 ↔ 文本解码/编码（Zed file_content.rs 逐字
 //!   移植：BOM/二进制判定/chardetng 嗅探），打开与保存共用
 //!
 //! vendor 编辑底座见 `vendor/gpui-component/src/input/`
 //! （rope/光标/undo/IME），本域不碰内核。
 
+pub(crate) mod definition;
 pub(crate) mod file_content;
 pub(crate) mod kind;
 pub mod markdown;

@@ -679,7 +679,11 @@ impl Chat {
         };
         let abs = cwd.join(&rel);
         // 行跳转请求：文件 tab 渲染帧消费（view.rs 灌进编辑器光标）
-        self.ws.pending_jump = Some((abs.clone(), line.max(1)));
+        self.ws.pending_jump = Some(crate::shell::PendingJump {
+            path: abs.clone(),
+            line: line.max(1),
+            col: 0,
+        });
         self.open_file_tab(abs, cx);
         cx.notify();
     }

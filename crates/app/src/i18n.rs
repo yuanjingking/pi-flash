@@ -385,6 +385,9 @@ const TABLE: &[(&str, &str, &str, &str)] = &[
     ("file_view.binary_unsupported", "二进制文件不受支持", "不支援二進位檔案", "Binary files are not supported"),
     ("file_view.open_in_default_app", "在默认应用中打开", "以預設應用程式開啟", "Open in Default App"),
     ("file_view.save_failed", "保存失败", "儲存失敗", "Save failed"),
+    // 023 跳转到定义
+    ("editor.goto_definition", "跳转到定义", "跳轉到定義", "Go to Definition"),
+    ("editor.def_not_found", "未找到定义", "找不到定義", "Definition not found"),
     // 051-apikey管理
     ("conflict.configured_vault", "已配置 · 系统凭据库", "已設定 · 系統憑證庫", "Configured · OS vault"),
     ("conflict.configured_file", "已配置 · 文件存储", "已設定 · 檔案儲存", "Configured · file storage"),

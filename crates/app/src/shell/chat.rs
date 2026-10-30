@@ -432,6 +432,16 @@ impl TermDock {
     }
 }
 
+/// 待跳转请求（跨文件定位）：目标文件 + 1-based 行 + 0-based 行内字节列。
+/// 生产者 = 083 项目搜索（列恒 0）与 023 跳转到定义（列 = 定义名起点）；
+/// 唯一消费者 = editor::view::consume_pending_jump（文件 tab 渲染帧）。
+#[derive(Clone, Debug)]
+pub(crate) struct PendingJump {
+    pub(crate) path: PathBuf,
+    pub(crate) line: u32,
+    pub(crate) col: u32,
+}
+
 /// 工作区簇（4ea 字段重组）：文件树/fs 监听、编辑器 tab/md 预览、终端、
 /// git 面板与 cwd/branch 根（021/022/023）。
 pub(crate) struct WsUi {
@@ -482,10 +492,10 @@ pub(crate) struct WsUi {
     pub(crate) file_cache: std::collections::HashMap<PathBuf, FileTab>,
     /// 083 项目搜索状态（搜索条输入/开关/结果行模型；tab 单例，切 tab 不丢）
     pub(crate) search: crate::search::SearchUi,
-    /// 083 搜索结果点击的行跳转请求（文件 tab 渲染帧消费：把编辑器光标
-    /// 挪到目标行——`InputState::set_cursor_position` 要 `&mut Window`，
-    /// 只有渲染帧同时拿得到 window 与 Chat）
-    pub(crate) pending_jump: Option<(PathBuf, u32)>,
+    /// 083 搜索结果点击 / 跳转到定义的待跳请求（文件 tab 渲染帧消费：把
+    /// 编辑器光标挪到目标行列——`InputState::set_cursor_position` 要
+    /// `&mut Window`，只有渲染帧同时拿得到 window 与 Chat）
+    pub(crate) pending_jump: Option<PendingJump>,
     pub(crate) panel_tabs: Vec<PanelTab>,
     pub(crate) active_panel_tab: Option<usize>,
     /// md 预览滚动条状态（MarkdownKind preview 面板的 v63-6 配方）

@@ -4,3 +4,5 @@
 pub(crate) mod chat;
 pub(crate) mod render;
 pub(crate) mod types;
+
+pub(crate) use chat::PendingJump;

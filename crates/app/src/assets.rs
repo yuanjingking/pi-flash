@@ -159,6 +159,8 @@ assets! {
     "icons/clock.svg",
     "icons/arrow-up.svg",
     "icons/arrow-down.svg",
+    // 023 跳转到定义：编辑器右键菜单项（lucide arrow-up-right）
+    "icons/arrow-up-right.svg",
     "icons/wand.svg",
     "icons/bot.svg",
     // 060 微信通信页：微信渠道卡 icon（simple-icons wechat，与 npm/github 同源）

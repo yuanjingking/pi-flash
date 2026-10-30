@@ -94,6 +94,7 @@ actions!(
         ComposerTab,
         ComposerPaste,
         FileSave,
+        GotoDefinition,
         OpenProjectPicker,
         NewSession,
         OpenSessionSearch,
@@ -294,6 +295,9 @@ fn main() {
                 // 023 fileView：编辑器里 Ctrl+S 保存（composer 等其他 Input
                 // 上下文内无人监听该 action，自然空转）
                 KeyBinding::new("ctrl-s", FileSave, Some("Input")),
+                // 023 跳转到定义：F12（Zed keymap::GoToDefinition 同键；
+                // 编辑器持焦时生效，无「悬停色线/缓存」前置，直接解析）
+                KeyBinding::new("f12", GotoDefinition, Some("Input")),
                 // 082 四期（Zed Pane 模式，替代三期无上下文版）：双绑定锚定——
                 // Some("ContentTabs") 命中内容区任意后代焦点（终端/预览/中性
                 // 锚点，同 gpui 前缀匹配 keymap/context.rs:253）；Some("Input")

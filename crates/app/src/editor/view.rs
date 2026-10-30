@@ -99,21 +99,22 @@ fn ensure_file_editor(
     }
 }
 
-/// 消费搜索结果的「跳到第 N 行」请求（083）：把编辑器光标挪到目标行首。
-/// `set_cursor_offset` 内部 `move_to` → `scroll_to` 会保证光标可见，因此
-/// 不需要额外的滚动 API（与 Zed 点击搜索结果后 reveal 到范围同效）。
+/// 消费「跳到第 N 行第 M 列」请求（083 项目搜索 / 023 跳转到定义）：把
+/// 编辑器光标挪到目标位置。`set_cursor_offset` 内部 `move_to` → `scroll_to`
+/// 会保证光标可见，因此不需要额外的滚动 API（与 Zed 点击搜索结果后
+/// reveal 到范围同效）。
 fn consume_pending_jump(chat: &mut Chat, path: &Path, cx: &mut Context<Chat>) {
-    let Some((target, line)) = chat.ws.pending_jump.clone() else {
+    let Some(jump) = chat.ws.pending_jump.clone() else {
         return;
     };
-    if !same_path(&target, path) {
+    if !same_path(&jump.path, path) {
         return;
     }
     chat.ws.pending_jump = None;
     let Some(ed) = chat.ws.file_cache.get(path).and_then(|f| f.editor.clone()) else {
         return;
     };
-    // 行号 → 字节偏移：内容来自磁盘真值缓存（编辑器未建时 open_file_tab
+    // 行列 → 字节偏移：内容来自磁盘真值缓存（编辑器未建时 open_file_tab
     // 已灌入内容；有未保存修改时取编辑器值，与正文一致）
     let content = chat
         .ws
@@ -124,13 +125,7 @@ fn consume_pending_jump(chat: &mut Chat, path: &Path, cx: &mut Context<Chat>) {
             _ => f.content.clone(),
         })
         .unwrap_or_default();
-    let mut offset = 0usize;
-    for (ix, raw) in content.split_inclusive('\n').enumerate() {
-        if ix + 1 >= line.max(1) as usize {
-            break;
-        }
-        offset += raw.len();
-    }
+    let offset = crate::editor::definition::offset_of_line_col(&content, jump.line, jump.col);
     ed.update(cx, |st, cx| st.set_cursor_offset(offset, cx));
 }
 
@@ -224,6 +219,10 @@ pub(crate) fn file_view(
         // 由本容器 on_action 接住
         .on_action(cx.listener(|this, _: &crate::FileSave, _w, cx| {
             this.save_active_file(cx);
+        }))
+        // F12（光标处符号）：与 Ctrl+Click 同一入口
+        .on_action(cx.listener(|this, _: &crate::GotoDefinition, _w, cx| {
+            this.goto_definition_at_cursor(cx);
         }));
 
     // zed 同款：只有「磁盘被改 + 本地有未保存修改」（Changed）才横幅裁决；
@@ -769,6 +768,12 @@ pub(crate) fn render_editor_surface(
     };
     let weak_menu = weak.clone();
     let menu_path = path.to_path_buf();
+    // 023 跳转到定义（Ctrl+Click）：编辑器内核的 on_mouse_down 先于容器
+    // 冒泡执行（已 `move_to(点击位置)`），故这里直接取光标偏移即可，
+    // 不需要反算 position→offset 的私有 API
+    let weak_def = weak.clone();
+    let def_path = path.to_path_buf();
+    let def_ed = ed.clone();
     // 族+字号都随「文档字体」槽位（zed buffer font 同语义，md 预览侧
     // base_style 已同源）；此前族硬编码 JetBrains Mono，设置里选族不生效
     let file_font = crate::appearance::file_font();
@@ -798,6 +803,19 @@ pub(crate) fn render_editor_surface(
                     ));
                     cx.notify();
                 });
+            },
+        )
+        // Ctrl+Click（macOS Cmd+Click）跳转到定义：修饰键不齐时不拦，
+        // 普通点击/拖选完全交给编辑器内核
+        .on_mouse_down(
+            gpui::MouseButton::Left,
+            move |ev: &gpui::MouseDownEvent, _w, cx| {
+                if !ev.modifiers.secondary() {
+                    return;
+                }
+                let offset = def_ed.read(cx).cursor();
+                let path = def_path.clone();
+                let _ = weak_def.update(cx, |c, cx| c.file_goto_definition(path, offset, cx));
             },
         )
         .child(
