@@ -29,7 +29,10 @@ use serde_json::Value;
 /// v1 → v2（091-1）：明细行要能点进对应会话，桶里补记 `first_line_start`
 /// （该条 usage 首次出现的行首字节偏移——pi 同一消息可能多条 entry，只有
 /// 首条是消息本体，偏移指过去才能定位到发言）。
-const CACHE_VERSION: u64 = 2;
+///
+/// v2 → v3（091-1）：明细行首列要显示会话标题（首条用户消息）而不是文件
+/// uuid，桶里补记 `title`。旧缓存无此字段 → 整份作废重扫一次。
+const CACHE_VERSION: u64 = 3;
 
 /// 一组用量合计（tokens 分项 + 费用 + 调用次数）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -85,6 +88,10 @@ struct Bucket {
     file: String,
     /// 该条 usage 首次出现的**行首**字节偏移（同消息多 entry 时指本体）
     first_line_start: u64,
+    /// 会话标题（首条用户消息截断；title 是文件级而非消息级，同一文件的
+    /// 所有桶存同一份——增量续读拿不到文件头时可从旧桶沿用）
+    #[serde(default)]
+    title: String,
     #[serde(flatten)]
     totals: UsageTotals,
 }
@@ -95,6 +102,8 @@ pub struct UsageEntry {
     pub provider: String,
     pub model: String,
     pub file: PathBuf,
+    /// 会话标题（首条用户消息，空串 = 旧数据/解析不出，前端退回文件名）
+    pub title: String,
     pub totals: UsageTotals,
 }
 
@@ -151,7 +160,12 @@ impl UsageStats {
             &str,
             BTreeMap<(&str, &str), (UsageTotals, BTreeMap<&str, UsageTotals>)>,
         > = BTreeMap::new();
+        // file → title（同一文件的所有桶同标题，取首个非空即可）
+        let mut titles: BTreeMap<&str, &str> = BTreeMap::new();
         for b in buckets {
+            titles
+                .entry(b.file.as_str())
+                .or_insert_with(|| b.title.as_str());
             let day = by_day.entry(b.date.as_str()).or_default();
             let (row_total, files) = day
                 .entry((b.provider.as_str(), b.model.as_str()))
@@ -171,6 +185,10 @@ impl UsageStats {
                         provider: provider.to_string(),
                         model: model.to_string(),
                         file: PathBuf::from(file),
+                        title: titles
+                            .get(file)
+                            .map(|s| s.to_string())
+                            .unwrap_or_default(),
                         totals: f,
                     });
                 }
@@ -366,6 +384,7 @@ fn parse_line_bucket(line: &str, line_start: u64) -> Option<Bucket> {
         provider,
         model,
         file: String::new(),
+        title: String::new(),
         first_line_start: line_start,
         totals: UsageTotals {
             input,
@@ -378,9 +397,57 @@ fn parse_line_bucket(line: &str, line_start: u64) -> Option<Bucket> {
     })
 }
 
+/// 会话标题提取（title 是文件级而非消息级）：`type=="message"` 且
+/// `message.role=="user"` 的首条文本。口径同 `sessions.rs::scan_file` 的
+/// preview（String 直用 / Array 取 text 拼接），截 80 字符。粗筛先行——
+/// 只有含 `"role":"user"` 的行走 serde（同 parse_line_bucket 的思路）。
+fn title_of_line(line: &str) -> Option<String> {
+    if !line.contains("\"role\":\"user\"") && !line.contains("\"role\": \"user\"") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("message") {
+        return None;
+    }
+    if v["message"]["role"].as_str() != Some("user") {
+        return None;
+    }
+    let c = &v["message"]["content"];
+    let mut s = match c {
+        Value::String(s) => s.clone(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|b| (b["type"] == "text").then(|| b["text"].as_str().unwrap_or("")))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    };
+    if s.is_empty() {
+        return None;
+    }
+    s = s.replace(['\r', '\n'], " ");
+    let mut t = s.trim().to_string();
+    if t.chars().count() > 80 {
+        let mut cut = 80;
+        while !t.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        t.truncate(cut);
+        t.push('…');
+    }
+    (!t.is_empty()).then_some(t)
+}
+
 /// 从 `from` 字节起把新增行并进 `buckets`，返回消费到的字节偏移。
 /// 只在**完整行**（带 `\n`）末停下：半行留给下次（pi 正在写）。
-fn read_from(path: &Path, from: u64, buckets: &mut Vec<Bucket>) -> std::io::Result<u64> {
+/// `title` 回传扫描到的首个会话标题（first title wins，同 preview 口径；
+/// 增量续读读不到文件头时由调用方从旧桶沿用）。
+fn read_from(
+    path: &Path,
+    from: u64,
+    buckets: &mut Vec<Bucket>,
+    title: &mut Option<String>,
+) -> std::io::Result<u64> {
     let mut file = File::open(path)?;
     if from > 0 {
         file.seek(SeekFrom::Start(from))?;
@@ -400,10 +467,13 @@ fn read_from(path: &Path, from: u64, buckets: &mut Vec<Bucket>) -> std::io::Resu
         }
         let line_start = consumed;
         consumed += n as u64;
-        if let Ok(s) = std::str::from_utf8(&line)
-            && let Some(b) = parse_line_bucket(s, line_start)
-        {
-            buckets.push(b);
+        if let Ok(s) = std::str::from_utf8(&line) {
+            if title.is_none() {
+                *title = title_of_line(s);
+            }
+            if let Some(b) = parse_line_bucket(s, line_start) {
+                buckets.push(b);
+            }
         }
     }
     Ok(consumed)
@@ -440,7 +510,15 @@ pub fn scan(root: &Path, cache_path: Option<&Path>) -> UsageStats {
             Some(e) if size > e.size && e.bytes > 0 => (e.buckets.clone(), e.bytes),
             _ => (Vec::new(), 0),
         };
-        match read_from(&path, from, &mut buckets) {
+        // 增量续读读不到文件头的用户消息：title 从旧桶沿用；全量首扫则由
+        // read_from 捕获（first title wins）。
+        let inherited = cache
+            .files
+            .get(&key)
+            .and_then(|e| e.buckets.iter().find(|b| !b.title.is_empty()))
+            .map(|b| b.title.clone());
+        let mut title: Option<String> = None;
+        match read_from(&path, from, &mut buckets, &mut title) {
             Ok(consumed) => from = consumed,
             Err(_) => continue,
         }
@@ -460,6 +538,12 @@ pub fn scan(root: &Path, cache_path: Option<&Path>) -> UsageStats {
         });
         for b in &mut buckets {
             b.file = key.clone();
+            // 本轮新增的桶（增量尾部）无 title：沿用旧桶/本轮首扫捕获的
+            if b.title.is_empty()
+                && let Some(t) = inherited.as_ref().or(title.as_ref())
+            {
+                b.title = t.clone();
+            }
         }
         all.extend(buckets.iter().cloned());
         live.insert(
@@ -660,6 +744,76 @@ mod tests {
         v["version"] = serde_json::json!(CACHE_VERSION - 1);
         std::fs::write(&cache, v.to_string()).unwrap();
         assert_eq!(scan(&root, Some(&cache)).totals.calls, 1);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 明细行标题 = 首条用户消息（String 与 Array 两种 content），烘进桶后
+    /// 缓存命中 / 增量续读都不丢。
+    #[test]
+    fn title_captured_from_first_user_message() {
+        let base = std::env::temp_dir().join(format!("pf-usage-title-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("sessions");
+        let cache = base.join("usage-stats.json");
+        let d1 = iso_ms("2026-10-28T20:00:00.000Z").unwrap();
+        let user = |c: Value| {
+            serde_json::json!({"type":"message","message":{"role":"user","content":c}})
+                .to_string()
+        };
+        let p = write_session(
+            &root,
+            "--D--proj--",
+            "a.jsonl",
+            &[
+                user(Value::String("修复登录 bug".into())),
+                entry(d1, "deepseek", "v4-pro", 100, 10, 0.1),
+            ],
+        );
+        write_session(
+            &root,
+            "--D--proj--",
+            "b.jsonl",
+            &[
+                user(serde_json::json!([
+                    {"type":"text","text":"数组型首条："},
+                    {"type":"image"}
+                ])),
+                entry(d1, "openai", "gpt-5", 200, 20, 0.2),
+            ],
+        );
+        let stats = scan(&root, Some(&cache));
+        let mut titles: Vec<String> = stats
+            .days
+            .iter()
+            .flat_map(|d| d.sessions.iter())
+            .map(|e| e.title.clone())
+            .collect();
+        titles.sort();
+        assert_eq!(titles, ["修复登录 bug", "数组型首条："]);
+        // 模型行下的明细同源带 title
+        for d in &stats.days {
+            for r in &d.models {
+                assert!(r.sessions.iter().all(|e| !e.title.is_empty()));
+            }
+        }
+        // 缓存命中（指纹未变）：title 仍在
+        let cached = scan(&root, Some(&cache));
+        assert_eq!(cached.totals.calls, 2);
+        assert!(cached.days.iter().all(|d| d.sessions.iter().all(|e| !e.title.is_empty())));
+        // 增量续读（追加一条）：新桶从旧桶沿用 title
+        let mut body = std::fs::read_to_string(&p).unwrap();
+        body.push_str(&entry(d1, "deepseek", "v4-pro", 50, 5, 0.05));
+        body.push('\n');
+        std::fs::write(&p, body).unwrap();
+        let inc = scan(&root, Some(&cache));
+        assert_eq!(inc.totals.calls, 3);
+        let a = inc
+            .days
+            .iter()
+            .flat_map(|d| d.sessions.iter())
+            .find(|e| e.file == p)
+            .unwrap();
+        assert_eq!(a.title, "修复登录 bug");
         let _ = std::fs::remove_dir_all(&base);
     }
 

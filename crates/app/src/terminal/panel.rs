@@ -157,15 +157,11 @@ fn term_bar(chat: &mut Chat, cx: &mut gpui::Context<Chat>) -> gpui::AnyElement {
                 this.activate_terminal(ix, window, cx);
             }))
             .on_mouse_down(MouseButton::Middle, close_mid)
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(crate::ui::icon(
-                        "icon-terminal-solid",
-                        icon_tk::XS,
-                        if active { TERM_CURSOR } else { TAB_TEXT },
-                    )),
-            )
+            .child(div().flex_shrink_0().child(crate::ui::icon(
+                "icon-terminal-solid",
+                icon_tk::XS,
+                if active { TERM_CURSOR } else { TAB_TEXT },
+            )))
             .child(
                 div()
                     .min_w_0()
@@ -290,26 +286,22 @@ fn terminal_body(
         crate::terminal::TermStatus::Ready => {}
     }
     col.child(
-        div()
-            .flex_1()
-            .min_h_0()
-            .bg(rgb(TERM_BG))
-            .child(
-                crate::terminal::TerminalElement::new(tab, weak.clone())
-                    .blink_on(chat.ws.term_cursor_on)
-                    .track_focus(&tab.focus)
-                    .flex_1()
-                    .h_full()
-                    .on_mouse_down(MouseButton::Left, {
-                        let f = tab.focus.clone();
-                        move |_, window, _cx| {
-                            window.focus(&f);
-                        }
-                    })
-                    .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _w, cx| {
-                        this.terminal_key(ev, cx);
-                    })),
-            ),
+        div().flex_1().min_h_0().bg(rgb(TERM_BG)).child(
+            crate::terminal::TerminalElement::new(tab, weak.clone())
+                .blink_on(chat.ws.term_cursor_on)
+                .track_focus(&tab.focus)
+                .flex_1()
+                .h_full()
+                .on_mouse_down(MouseButton::Left, {
+                    let f = tab.focus.clone();
+                    move |_, window, _cx| {
+                        window.focus(&f);
+                    }
+                })
+                .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _w, cx| {
+                    this.terminal_key(ev, cx);
+                })),
+        ),
     )
     .into_any_element()
 }

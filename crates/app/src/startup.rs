@@ -854,7 +854,10 @@ fn boot_target() -> BootTarget {
             // 影子会话（pf-wxbot-*）**永不**做桌面恢复目标：按文件名前缀与
             // state.session_key 双保险（过滤清单可能滞后一轮）
             .filter(|p| {
-                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 if name.starts_with("pf-wxbot-") {
                     return false;
                 }

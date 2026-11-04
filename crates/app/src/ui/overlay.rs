@@ -67,11 +67,7 @@ pub fn layer(
 /// 推上（render.rs `dialog.is_some()` → `window.focus(dialog_focus)`）。
 /// 背景与定位由调用方定（微信绑定页 = 白蒙层、topbar 下方起铺）。
 pub fn layer_blocking(focus: &FocusHandle) -> gpui::Div {
-    div()
-        .absolute()
-        .inset_0()
-        .occlude()
-        .track_focus(focus)
+    div().absolute().inset_0().occlude().track_focus(focus)
 }
 
 /// 规则 4：卡片外壳。点卡片本身不触发「外点关闭」。

@@ -85,7 +85,16 @@ fn dev_sign_proof() -> Option<(String, String)> {
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let out = std::process::Command::new("node")
         .arg(&script)
-        .args(["sign", "--kid", &kid, "--build-id", "dev-local", "--version", &version, "--json"])
+        .args([
+            "sign",
+            "--kid",
+            &kid,
+            "--build-id",
+            "dev-local",
+            "--version",
+            &version,
+            "--json",
+        ])
         .env("PF_BUILD_KEY", &key)
         .output()
         .ok()?;

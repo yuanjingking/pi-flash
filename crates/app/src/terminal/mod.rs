@@ -1430,7 +1430,12 @@ impl Chat {
 
     /// 面板内标签切换（点标签 / 新建后定位）：只改激活位 + 焦点 + 滚动到
     /// 可见，不动展开态。
-    pub(crate) fn activate_terminal(&mut self, ix: usize, window: &mut gpui::Window, cx: &mut Context<Self>) {
+    pub(crate) fn activate_terminal(
+        &mut self,
+        ix: usize,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(tab) = self.ws.terminals.get(ix) else {
             return;
         };
@@ -1710,7 +1715,9 @@ impl Chat {
         // `exit` 就当作用户要关这个终端——直接关掉面板标签（同点标签的
         // ×，PTY Shutdown 一并走）。`exit 0` 等带参数的不算，照常执行（出
         // 横幅不崩）；全屏应用不掺和。
-        if k.key == "enter" && !mode.contains(TermMode::ALT_SCREEN) && is_bare_exit(&tab.term.lock())
+        if k.key == "enter"
+            && !mode.contains(TermMode::ALT_SCREEN)
+            && is_bare_exit(&tab.term.lock())
         {
             self.close_terminal(tab_id, cx);
             cx.stop_propagation();

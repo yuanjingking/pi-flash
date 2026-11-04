@@ -685,8 +685,8 @@ impl Chat {
             None => {
                 // 回会话 tab：微信线正在前台时必须真的离开它（它自己也是
                 // Chat 视图，只 set_content_view 会原地不动、还无 tab 高亮）
-                let changed = self.layout.content_view != ContentView::Chat
-                    || self.wx_line_active();
+                let changed =
+                    self.layout.content_view != ContentView::Chat || self.wx_line_active();
                 if self.wx_line_active() {
                     self.wx_leave_front(cx);
                 } else {

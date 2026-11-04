@@ -434,7 +434,12 @@ pub(super) fn dispatch(
                 // （建 ctx/装 wasm → onPanelOpen → render 缓存）；直接赋值
                 // dock_panel 会绕过它，插件面板永远停在「…」占位。
                 // dock="tab" 形态同步路由到预览页签（与状态栏点击同口径）
-                if chat.plugins.plugins.get(plugin_ix).is_none_or(|e| e.disabled) {
+                if chat
+                    .plugins
+                    .plugins
+                    .get(plugin_ix)
+                    .is_none_or(|e| e.disabled)
+                {
                     return Err(bad(format!("插件 ix={plugin_ix} 不存在或已停用")));
                 }
                 if chat.plugin_dock_is_tab(plugin_ix) {
@@ -803,19 +808,20 @@ pub(super) fn dispatch(
             // 002 §6 [新建会话]：confirm=false = 按钮同路径（运行守卫 + 弹
             // 确认框）；confirm=true = 确认按钮同路径（清 wx_cwd + wx_session
             // 引用 → 设置会话页）。
-            let confirm = params.get("confirm").and_then(Value::as_bool).unwrap_or(false);
+            let confirm = params
+                .get("confirm")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let dialog_opened = if confirm {
                 chat.wx_new_session_reset(cx);
                 false
             } else {
                 if chat.aux.remote.active_running {
                     let lang = wxprobe::format::messages::Lang::from_ix(crate::i18n::lang_ix());
-                    chat.aux
-                        .remote
-                        .send(&wxprobe::format::messages::t(
-                            lang,
-                            crate::remote_control::TASK_RUNNING,
-                        ));
+                    chat.aux.remote.send(&wxprobe::format::messages::t(
+                        lang,
+                        crate::remote_control::TASK_RUNNING,
+                    ));
                     false
                 } else {
                     chat.dlg.dialog = Some(crate::Dialog::WxNewSession);

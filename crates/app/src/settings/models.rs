@@ -534,7 +534,14 @@ pub(crate) fn mc_models_view(
         &d.enabled_filter_value,
         t,
     );
-    let detail = mc_models_detail(chat, &weak.clone(), &selected, d, &detail_error, &enabled_set);
+    let detail = mc_models_detail(
+        chat,
+        &weak.clone(),
+        &selected,
+        d,
+        &detail_error,
+        &enabled_set,
+    );
     div()
         .flex()
         .w_full()
@@ -1494,7 +1501,9 @@ pub(crate) enum MjTestState {
 /// 的活；点选候选只填模型ID输入框，自定义手输始终可用。
 #[derive(Debug, Clone)]
 pub(crate) enum MjNamesState {
-    Running { provider: String },
+    Running {
+        provider: String,
+    },
     Ready {
         provider: String,
         names: Vec<String>,
@@ -1511,7 +1520,10 @@ pub(crate) enum MjCatalogState {
     Idle,
     Running,
     /// Done：applied = 回填字段数；note = 价格可靠度提示（已格式化）
-    Done { applied: usize, note: String },
+    Done {
+        applied: usize,
+        note: String,
+    },
     Err(String),
 }
 
@@ -1541,8 +1553,8 @@ mod tests {
     fn merge_appends_only_missing_ids_for_provider() {
         let base = vec![model("glm-5.3", "zai"), model("glm-4.7", "zai")];
         let registry = dump(vec![
-            model("glm-5.3", "zai"), // 已在实拉目录里 → 不重复
-            model("glm-5.2", "zai"), // 静态补缺 → 追加
+            model("glm-5.3", "zai"),        // 已在实拉目录里 → 不重复
+            model("glm-5.2", "zai"),        // 静态补缺 → 追加
             model("kimi-k3", "moonshotai"), // 他商条目 → 不混入
         ]);
         let merged = merge_registry_models(base, Some(&registry), "zai");

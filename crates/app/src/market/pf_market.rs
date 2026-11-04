@@ -322,8 +322,7 @@ fn all_body(
         .plugins
         .iter()
         .filter_map(|p| {
-            crate::pf_plugin::status_bar_icon_path(p)
-                .map(|icon| (p.manifest.pkg.clone(), icon))
+            crate::pf_plugin::status_bar_icon_path(p).map(|icon| (p.manifest.pkg.clone(), icon))
         })
         .collect();
     let cols = if m.narrow { 1 } else { 2 };
@@ -402,12 +401,7 @@ fn all_body(
 }
 
 /// 页面骨架（**两个页签共用**）：头段 + body + 底部 `shell_pad`（与顶部对称）。
-fn page_frame(
-    head: AnyElement,
-    body: AnyElement,
-    m: &Metrics,
-    t: &'static Theme,
-) -> AnyElement {
+fn page_frame(head: AnyElement, body: AnyElement, m: &Metrics, t: &'static Theme) -> AnyElement {
     gpui::div()
         .w_full()
         .flex_1()

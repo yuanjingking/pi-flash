@@ -15,7 +15,7 @@ use crate::appearance::theme::{Theme, border_alpha};
 use crate::editor::markdown::MONO_FAMILY;
 use crate::i18n::tr;
 use crate::services::format::fmt_thousand;
-use pi_link::usage_stats::{UsageDay, UsageEntry, UsageStats};
+use pi_link::usage_stats::{UsageDay, UsageEntry, UsageRow, UsageStats};
 
 /// 数值列宽（明细表六列对齐的单一来源）。
 const NUM_W: f32 = 84.;
@@ -23,7 +23,7 @@ const NUM_W: f32 = 84.;
 /// 一次最多画多少天（超出部分提示见页脚；几百天全画会把单帧变重）。
 const MAX_DAYS: usize = 120;
 
-/// 单日单模型最多画多少条会话明细（超长日期卡片也不至于拖帧；同模型下
+/// 单日**单模型**最多画多少条会话明细（超长日期卡片也不至于拖帧；同模型下
 /// 会话按费用/token 降序，砍尾不砍头）。
 const MAX_SESSIONS_PER_DAY: usize = 50;
 
@@ -265,14 +265,30 @@ fn search_row(chat: &Chat, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> AnyEleme
         .into_any_element()
 }
 
+/// 标签截断：超长加省略号（char boundary 安全）。
+fn trunc_label(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        None => s.to_string(),
+        Some((i, _)) => format!("{}…", &s[..i]),
+    }
+}
+
 /// 会话明细行（091-1）：一天内每个会话一行，点击 → 跳进对应会话。
+/// 首列优先显示会话标题（首条用户消息，pi-link 扫描时已烘进缓存，渲染期
+/// 零 IO）；旧数据/解析不出退回文件名 uuid。
 fn entry_row(entry: &UsageEntry, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> AnyElement {
-    let label = entry
+    let id_label = entry
         .file
         .file_stem()
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| entry.file.to_string_lossy().to_string());
+    // 标题是散文 → 默认字体；退回的 uuid → 等宽字体
+    let (label, mono) = if entry.title.is_empty() {
+        (id_label, true)
+    } else {
+        (trunc_label(&entry.title, 40), false)
+    };
     let num = |text: String| {
         div()
             .w(px(NUM_W))
@@ -292,7 +308,7 @@ fn entry_row(entry: &UsageEntry, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> An
         .items_center()
         .gap(px(8.))
         .py(px(3.))
-        .pl(px(16.))
+        .pl(px(28.))
         .cursor_pointer()
         .text_size(crate::appearance::ui_size(11.))
         .text_color(rgb(t.text_faint))
@@ -309,7 +325,7 @@ fn entry_row(entry: &UsageEntry, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> An
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
-                .font_family(MONO_FAMILY)
+                .when(mono, |d| d.font_family(MONO_FAMILY))
                 .child(SharedString::from(format!(
                     "{} · {}",
                     tr("usage.jump"),
@@ -324,7 +340,63 @@ fn entry_row(entry: &UsageEntry, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> An
         .into_any_element()
 }
 
-/// 一天的卡片：日期 + 当日合计 + 该日各会话明细（可点击跳转）。
+/// 模型分组行（不可点击，无跳转语义）：该模型当日合计，六列与表头
+/// 「模型」列对齐；比会话明细行重一档（提亮 + SEMIBOLD）作为组头。
+fn model_row(row: &UsageRow, t: &Theme) -> AnyElement {
+    let num = |text: String| {
+        div()
+            .w(px(NUM_W))
+            .text_right()
+            .text_size(crate::appearance::ui_size(11.5))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(rgb(t.text_muted))
+            .child(SharedString::from(text))
+    };
+    // 非交互行：无 on_mouse_down/cursor_pointer，几何常量全走 NUM_W
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .py(px(3.))
+        .pl(px(8.))
+        .text_size(crate::appearance::ui_size(11.5))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(t.text_muted))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .child(SharedString::from(row.model.clone())),
+        )
+        .child(num(fmt_thousand(row.totals.input)))
+        .child(num(fmt_thousand(row.totals.output)))
+        .child(num(fmt_thousand(row.totals.cache_tokens())))
+        .child(num(fmt_cost(row.totals.cost)))
+        .child(num(fmt_thousand(row.totals.calls)))
+        .into_any_element()
+}
+
+/// 一个模型的分组块：模型合计行 + 该模型的会话明细行（缩进一级）。
+fn model_group(
+    row: &UsageRow,
+    weak: &gpui::WeakEntity<Chat>,
+    t: &Theme,
+) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .child(model_row(row, t))
+        .children(
+            row.sessions
+                .iter()
+                .take(MAX_SESSIONS_PER_DAY)
+                .map(|e| entry_row(e, weak, t)),
+        )
+        .into_any_element()
+}
+
+/// 一天的卡片：日期 + 当日合计 + 按模型分组的明细（模型行 → 会话行）。
 fn day_card(day: &UsageDay, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> AnyElement {
     let day_line = |label: &str, val: String| format!("{label} {val}");
     div()
@@ -364,10 +436,9 @@ fn day_card(day: &UsageDay, weak: &gpui::WeakEntity<Chat>, t: &Theme) -> AnyElem
                 ),
         )
         .children(
-            day.sessions
+            day.models
                 .iter()
-                .take(MAX_SESSIONS_PER_DAY)
-                .map(|e| entry_row(e, weak, t)),
+                .map(|row| model_group(row, weak, t)),
         )
         .into_any_element()
 }
@@ -431,4 +502,19 @@ fn days_list(
                 .child(crate::ui::psp_scrollbar::menu_scrollbar(scroll)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 明细行标题截断：不超不切，超长按 char boundary 切并补省略号。
+    #[test]
+    fn trunc_label_bounds_by_chars() {
+        assert_eq!(trunc_label("短标题", 40), "短标题");
+        assert_eq!(trunc_label(&"a".repeat(40), 40), "a".repeat(40));
+        let long = "中".repeat(41);
+        let got = trunc_label(&long, 40);
+        assert_eq!(got, format!("{}…", "中".repeat(40)));
+    }
 }

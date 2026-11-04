@@ -540,10 +540,7 @@ fn section_count(tree: &ResolvedNode) -> usize {
 /// 插件预览页签内容（契约 v2.4 dock="tab"，`ContentView::Plugin` 分支）：
 /// 归属 = 活跃标签携带的 pkg（重装/重载后 ix 漂移安全，经 by_pkg 现查），
 /// 主体复用 dock 的 `plugin_panel_view`（同一解释器，同一渲染契约）。
-pub(crate) fn plugin_tab_page(
-    chat: &Chat,
-    weak: &gpui::WeakEntity<Chat>,
-) -> gpui::AnyElement {
+pub(crate) fn plugin_tab_page(chat: &Chat, weak: &gpui::WeakEntity<Chat>) -> gpui::AnyElement {
     let t = T();
     let active = chat
         .ws
@@ -905,7 +902,13 @@ fn render_node_inner(
                         }
                         d
                     }
-                    CanvasPaint::Text { x, y, size, tone, value } => div()
+                    CanvasPaint::Text {
+                        x,
+                        y,
+                        size,
+                        tone,
+                        value,
+                    } => div()
                         .absolute()
                         .left(px(*x))
                         .top(px(*y))
@@ -1361,9 +1364,8 @@ fn hex_color(s: &str) -> Option<u32> {
             u8::from_str_radix(&h[4..6], 16).ok()?,
         ),
         3 => {
-            let c = |i: usize| -> Option<u8> {
-                Some(u8::from_str_radix(&h[i..i + 1], 16).ok()? * 17)
-            };
+            let c =
+                |i: usize| -> Option<u8> { Some(u8::from_str_radix(&h[i..i + 1], 16).ok()? * 17) };
             (c(0)?, c(1)?, c(2)?)
         }
         _ => return None,

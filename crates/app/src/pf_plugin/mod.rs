@@ -453,7 +453,7 @@ fn parse_manifest(dir: &Path) -> Result<PluginManifest, String> {
                         return Err(format!(
                             "pf-plugin.toml 行 {}：dock 只认 \"panel\" | \"tab\"，得到 {other}",
                             n + 1
-                        ))
+                        ));
                     }
                 };
             }
@@ -768,10 +768,7 @@ pub(crate) struct Claim {
 /// 认领会话名：`{prefix}YYMMDDHHMMSSmmm`（与 wx 线同款 15 位时间戳口径，
 /// 002 §5）。纯函数便于单测。
 pub(crate) fn claim_session_name(prefix: &str) -> String {
-    format!(
-        "{prefix}{}",
-        chrono::Local::now().format("%y%m%d%H%M%S%3f")
-    )
+    format!("{prefix}{}", chrono::Local::now().format("%y%m%d%H%M%S%3f"))
 }
 
 /// JsHost 实现（02 §3 提问类同步、动作类入队）。
@@ -931,7 +928,8 @@ impl Chat {
         let key = format!("draft-{}", self.pool.draft_seq);
         self.pool.draft_seq += 1;
         let rt = cx.new(|_| {
-            let mut r = crate::session::runtime::SessionRuntime::new(key.clone(), cwd_path.clone(), None);
+            let mut r =
+                crate::session::runtime::SessionRuntime::new(key.clone(), cwd_path.clone(), None);
             r.default_model = crate::services::workspace::default_model_pref();
             r.status = crate::i18n::tr("session.new").to_string();
             r
@@ -998,20 +996,23 @@ impl Chat {
         if entry.disabled {
             return;
         };
-        let Some((pkg, page)) = entry.manifest.tab_page().map(|(p, g)| (p.to_string(), g.to_string()))
+        let Some((pkg, page)) = entry
+            .manifest
+            .tab_page()
+            .map(|(p, g)| (p.to_string(), g.to_string()))
         else {
             return;
         };
         // 单例：同 pkg+page 已开 → 激活既有页签（不重排，082 顺序稳定）
-        let tix = self
-            .ws
-            .panel_tabs
-            .iter()
-            .position(|t| matches!(t, crate::PanelTab::Plugin { pkg: p, page: g } if p == &pkg && g == &page));
+        let tix = self.ws.panel_tabs.iter().position(
+            |t| matches!(t, crate::PanelTab::Plugin { pkg: p, page: g } if p == &pkg && g == &page),
+        );
         let tix = match tix {
             Some(tix) => tix,
             None => {
-                self.ws.panel_tabs.push(crate::PanelTab::Plugin { pkg, page });
+                self.ws
+                    .panel_tabs
+                    .push(crate::PanelTab::Plugin { pkg, page });
                 self.ws.panel_tabs.len() - 1
             }
         };
@@ -1461,7 +1462,10 @@ impl Chat {
                 let Some(inst) = entry.wasm.as_mut() else {
                     return;
                 };
-                (inst.on_event("broadcast", name, payload), inst.pump_actions())
+                (
+                    inst.on_event("broadcast", name, payload),
+                    inst.pump_actions(),
+                )
             };
             match res {
                 Ok(()) => {
@@ -1821,7 +1825,9 @@ entry = "main.js"
         let dir2 = tmp.join("dup");
         write_manifest(
             &dir2,
-            &format!("{body}\n[[contributes.topbar_menu]]\ntitle = {{ zh = \"第二条\" }}\nicon = \"bolt\"\n"),
+            &format!(
+                "{body}\n[[contributes.topbar_menu]]\ntitle = {{ zh = \"第二条\" }}\nicon = \"bolt\"\n"
+            ),
         );
         std::fs::write(dir2.join("main.js"), "export function render(){{}}").unwrap();
         assert!(parse_manifest(&dir2).is_err(), "topbar_menu 只能声明一个");
@@ -1833,9 +1839,7 @@ entry = "main.js"
     #[test]
     fn manifest_sessions_parse() {
         let tmp = std::env::temp_dir().join(format!("pf-sessions-test-{}", std::process::id()));
-        let body = format!(
-            "{GOOD}\n[[contributes.sessions]]\nprefix = \"pf-wxbot-\"\n"
-        );
+        let body = format!("{GOOD}\n[[contributes.sessions]]\nprefix = \"pf-wxbot-\"\n");
         let dir = tmp.join("quick-panel");
         write_manifest(&dir, &body);
         std::fs::write(dir.join("main.js"), "export function render(){{}}").unwrap();
@@ -1865,7 +1869,10 @@ entry = "main.js"
         let tmp = std::env::temp_dir().join(format!("pf-dock-test-{}", std::process::id()));
         // tab 形态
         let dir = tmp.join("quick-panel");
-        write_manifest(&dir, &GOOD.replace("entry = \"main.js\"", "entry = \"main.js\"\ndock = \"tab\""));
+        write_manifest(
+            &dir,
+            &GOOD.replace("entry = \"main.js\"", "entry = \"main.js\"\ndock = \"tab\""),
+        );
         std::fs::write(dir.join("main.js"), "export function render(){{}}").unwrap();
         std::fs::create_dir_all(dir.join("assets")).unwrap();
         std::fs::write(dir.join("assets/bolt.svg"), "<svg/>").unwrap();
@@ -1884,7 +1891,13 @@ entry = "main.js"
 
         // 非法值拒装（封闭词表）
         let dir = tmp.join("quick-panel");
-        write_manifest(&dir, &GOOD.replace("entry = \"main.js\"", "entry = \"main.js\"\ndock = \"sidebar\""));
+        write_manifest(
+            &dir,
+            &GOOD.replace(
+                "entry = \"main.js\"",
+                "entry = \"main.js\"\ndock = \"sidebar\"",
+            ),
+        );
         let e = parse_manifest(&dir).unwrap_err();
         assert!(e.contains("dock"), "错误应提及 dock：{e}");
 

@@ -79,6 +79,13 @@ impl Render for Chat {
                 .as_ref()
                 .filter(|_| self.picker_filter_shown(cx))
                 .map(|p| p.input.clone())
+        })
+        .or_else(|| {
+            // 091-1：「用量统计」弹窗的搜索框同享焦点保持——不挂这条，
+            // 下面 dialog_focus 回收分支每帧把按键抢回卡片，搜索框永远打不进字
+            matches!(self.dlg.dialog, Some(Dialog::UsageStats))
+                .then(|| self.aux.usage.search_input.clone())
+                .flatten()
         });
         // 详情卡的原地改名输入框也要持有焦点——否则每帧的焦点回收
         // 会把它抢回主输入框，键盘输入进不去

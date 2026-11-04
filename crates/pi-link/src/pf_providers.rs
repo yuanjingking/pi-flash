@@ -143,15 +143,11 @@ pub fn migrate_infer_api_at(path: &Path) -> usize {
         {
             continue;
         }
-        let base = entry
-            .get("baseUrl")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let base = entry.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
         if base.is_empty() {
             continue;
         }
-        entry["api"] =
-            serde_json::Value::String(crate::probe::infer_api(base).to_string());
+        entry["api"] = serde_json::Value::String(crate::probe::infer_api(base).to_string());
         crate::models_json::upsert_provider(&mut doc, &name, entry);
         fixed += 1;
     }
@@ -443,7 +439,11 @@ mod tests {
         let doc = read_at(&p).unwrap();
         let get = |n: &str| crate::models_json::provider_entry(&doc, n).unwrap().clone();
         assert_eq!(get("my-ds")["api"], "anthropic-messages");
-        assert_eq!(get("legacy")["api"], "openai-responses", "显式 api 尊重保留");
+        assert_eq!(
+            get("legacy")["api"],
+            "openai-responses",
+            "显式 api 尊重保留"
+        );
         assert!(get("wip").get("api").is_none(), "无 baseUrl 半建条目跳过");
         assert_eq!(migrate_infer_api_at(&p), 0, "幂等");
         clean(&p);
@@ -461,8 +461,7 @@ mod tests {
         .unwrap();
         assert_eq!(migrate_model_defaults_at(&p), 1);
         let doc = read_at(&p).unwrap();
-        let m = &crate::models_json::provider_entry(&doc, "my-ds")
-            .unwrap()["models"][0];
+        let m = &crate::models_json::provider_entry(&doc, "my-ds").unwrap()["models"][0];
         assert_eq!(m["input"], json!(["text"]));
         assert_eq!(m["reasoning"], json!(true));
         assert_eq!(m["cost"]["output"], json!(0));

@@ -1629,7 +1629,11 @@ mod tests {
         ], "active": 0, "chat": true });
         let back = tabs_state_from_value(&v).unwrap();
         assert_eq!(back.tabs.len(), 1, "非法条目丢弃");
-        assert_eq!(back.terms, vec!["D:\\proj".to_string()], "旧终端条目迁入 terms");
+        assert_eq!(
+            back.terms,
+            vec!["D:\\proj".to_string()],
+            "旧终端条目迁入 terms"
+        );
         assert!(back.term_open, "旧档无 term_open：有终端按展开恢复");
 
         // 旧版 per-project 嵌套形态（无顶层 tabs）= 不识别

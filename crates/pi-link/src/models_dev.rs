@@ -184,8 +184,12 @@ pub fn flatten(value: &Value) -> Vec<CatalogEntry> {
                 reasoning: raw_model.get("reasoning").and_then(|v| v.as_bool()),
                 input: read_input_modalities(raw_model.get("modalities")),
                 // models.dev 把窗口/输出上限放在 limit{context,output}
-                context_window: raw_model.get("limit").and_then(|l| opt_pos_num(l.get("context"))),
-                max_tokens: raw_model.get("limit").and_then(|l| opt_pos_num(l.get("output"))),
+                context_window: raw_model
+                    .get("limit")
+                    .and_then(|l| opt_pos_num(l.get("context"))),
+                max_tokens: raw_model
+                    .get("limit")
+                    .and_then(|l| opt_pos_num(l.get("output"))),
                 cost: read_cost(raw_model.get("cost")),
                 id,
                 name,
@@ -206,7 +210,10 @@ fn normalize_provider(s: &str) -> String {
 }
 
 fn normalize_model_id(s: &str) -> String {
-    s.trim().to_lowercase().trim_start_matches("models/").to_string()
+    s.trim()
+        .to_lowercase()
+        .trim_start_matches("models/")
+        .to_string()
 }
 
 fn hostname(url: &str) -> Option<String> {
@@ -303,7 +310,10 @@ fn consensus_metadata<'a>(entries: &[&'a CatalogEntry]) -> Preset {
             .unwrap_or(n)
     });
     if let Some(n) = &names {
-        let support = entries.iter().filter(|e| &e.name.to_lowercase() == &n.to_lowercase()).count();
+        let support = entries
+            .iter()
+            .filter(|e| &e.name.to_lowercase() == &n.to_lowercase())
+            .count();
         if !share_ok(support) {
             return Preset::default();
         }
@@ -366,7 +376,11 @@ fn consensus_price<'a>(entries: &[&'a CatalogEntry]) -> Price {
         .copied()
         .collect();
     if priced.is_empty() {
-        return Price::Unreliable { reason: "no-valid-price", support: 0, total: 0 };
+        return Price::Unreliable {
+            reason: "no-valid-price",
+            support: 0,
+            total: 0,
+        };
     }
     if priced.len() == 1 {
         return Price::Unreliable {
@@ -408,8 +422,11 @@ fn consensus_price<'a>(entries: &[&'a CatalogEntry]) -> Price {
             total: priced.len(),
         };
     }
-    let winners: Vec<&CatalogEntry> =
-        priced.iter().filter(|e| key(e) == *win_key).copied().collect();
+    let winners: Vec<&CatalogEntry> = priced
+        .iter()
+        .filter(|e| key(e) == *win_key)
+        .copied()
+        .collect();
     let cache_read = mode_value(
         &winners
             .iter()
@@ -508,9 +525,7 @@ pub fn fill_empty(model: &mut Value, preset: &Preset) -> usize {
         return 0;
     };
     let empty_str = |v: Option<&Value>| v.and_then(|x| x.as_str()).unwrap_or("").trim().is_empty();
-    if preset.name.as_deref().is_some_and(|n| !n.is_empty())
-        && empty_str(map.get("name"))
-    {
+    if preset.name.as_deref().is_some_and(|n| !n.is_empty()) && empty_str(map.get("name")) {
         map.insert("name".into(), Value::String(preset.name.clone().unwrap()));
         applied += 1;
     }
@@ -550,7 +565,10 @@ pub fn fill_empty(model: &mut Value, preset: &Preset) -> usize {
         if let (Some(i), Some(o), Some(cr), Some(cw)) =
             (cost.input, cost.output, cost.cache_read, cost.cache_write)
         {
-            let existing = map.get("cost").cloned().unwrap_or_else(|| Value::Object(Default::default()));
+            let existing = map
+                .get("cost")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Default::default()));
             let mut merged = serde_json::Map::new();
             if let Some(m) = existing.as_object() {
                 for (k, v) in m {
@@ -558,7 +576,12 @@ pub fn fill_empty(model: &mut Value, preset: &Preset) -> usize {
                 }
             }
             let mut filled = 0;
-            for (k, v) in [("input", i), ("output", o), ("cacheRead", cr), ("cacheWrite", cw)] {
+            for (k, v) in [
+                ("input", i),
+                ("output", o),
+                ("cacheRead", cr),
+                ("cacheWrite", cw),
+            ] {
                 if merged.get(k).and_then(|x| x.as_f64()).is_none() {
                     merged.insert(k.to_string(), serde_json::json!(v));
                     filled += 1;
@@ -690,11 +713,17 @@ mod tests {
         let e = &entries[0];
         assert_eq!(e.provider_id, "anthropic");
         assert_eq!(e.provider_name, "Anthropic");
-        assert_eq!(e.provider_base_url.as_deref(), Some("https://api.anthropic.com"));
+        assert_eq!(
+            e.provider_base_url.as_deref(),
+            Some("https://api.anthropic.com")
+        );
         assert_eq!(e.id, "claude-x");
         assert_eq!(e.name, "Claude X");
         assert_eq!(e.reasoning, Some(true));
-        assert_eq!(e.input.as_deref(), Some(&["text".to_string(), "image".to_string()][..]));
+        assert_eq!(
+            e.input.as_deref(),
+            Some(&["text".to_string(), "image".to_string()][..])
+        );
         assert_eq!(e.context_window, Some(200000));
         assert_eq!(e.max_tokens, Some(8192));
         assert_eq!(e.cost.input, Some(3.0));
@@ -713,7 +742,12 @@ mod tests {
                 input: Some(vec!["text".into()]),
                 context_window: Some(128000),
                 max_tokens: Some(8192),
-                cost: Cost { input: Some(0.27), output: Some(1.1), cache_read: None, cache_write: None },
+                cost: Cost {
+                    input: Some(0.27),
+                    output: Some(1.1),
+                    cache_read: None,
+                    cache_write: None,
+                },
                 provider_base_url: Some("https://api.deepseek.com".into()),
             },
             CatalogEntry {
@@ -725,7 +759,12 @@ mod tests {
                 input: None,
                 context_window: Some(64000),
                 max_tokens: None,
-                cost: Cost { input: Some(0.5), output: Some(2.0), cache_read: None, cache_write: None },
+                cost: Cost {
+                    input: Some(0.5),
+                    output: Some(2.0),
+                    cache_read: None,
+                    cache_write: None,
+                },
                 provider_base_url: Some("https://openrouter.ai".into()),
             },
         ];
@@ -734,19 +773,43 @@ mod tests {
         assert_eq!(r.exact_matches, 2);
         assert_eq!(r.preset.name.as_deref(), Some("DeepSeek V3"));
         assert_eq!(r.preset.context_window, Some(128000));
-        assert!(matches!(r.price, Some(Price::Reliable { method: MatchMethod::Provider, .. })));
+        assert!(matches!(
+            r.price,
+            Some(Price::Reliable {
+                method: MatchMethod::Provider,
+                ..
+            })
+        ));
         // baseUrl 命中（provider 名不匹配）
         let r = recommend(&entries, "ds-v3", "no-such", "https://api.deepseek.com/v1");
         assert_eq!(r.preset.name.as_deref(), Some("DeepSeek V3"));
-        assert!(matches!(r.price, Some(Price::Reliable { method: MatchMethod::BaseUrl, .. })));
+        assert!(matches!(
+            r.price,
+            Some(Price::Reliable {
+                method: MatchMethod::BaseUrl,
+                ..
+            })
+        ));
         // 都不匹配 → 共识元数据 + 共识价格（价格分组冲突 → unreliable）
         let r = recommend(&entries, "ds-v3", "no-such", "");
         assert_eq!(r.preset.name, None, "两组元数据无共识 → 不回填");
-        assert!(matches!(r.price, Some(Price::Unreliable { reason: "conflict", .. })));
+        assert!(matches!(
+            r.price,
+            Some(Price::Unreliable {
+                reason: "conflict",
+                ..
+            })
+        ));
         // id 不存在
         let r = recommend(&entries, "gpt-9", "deepseek", "");
         assert_eq!(r.exact_matches, 0);
-        assert!(matches!(r.price, Some(Price::Unreliable { reason: "no-exact-match", .. })));
+        assert!(matches!(
+            r.price,
+            Some(Price::Unreliable {
+                reason: "no-exact-match",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -763,8 +826,14 @@ mod tests {
             cost: Cost::default(),
             provider_base_url: None,
         }];
-        assert_eq!(recommend(&entries, "google/gemini-flash", "", "").exact_matches, 1);
-        assert_eq!(recommend(&entries, "models/gemini-flash", "", "").exact_matches, 1);
+        assert_eq!(
+            recommend(&entries, "google/gemini-flash", "", "").exact_matches,
+            1
+        );
+        assert_eq!(
+            recommend(&entries, "models/gemini-flash", "", "").exact_matches,
+            1
+        );
         assert_eq!(recommend(&entries, "GEMINI-FLASH", "", "").exact_matches, 1);
     }
 
@@ -828,13 +897,21 @@ mod tests {
             input: None,
             context_window: None,
             max_tokens: None,
-            cost: Cost { input: Some(input), output: Some(output), cache_read: None, cache_write: None },
+            cost: Cost {
+                input: Some(input),
+                output: Some(output),
+                cache_read: None,
+                cache_write: None,
+            },
             provider_base_url: None,
         };
         let entries = vec![mk(1.0, 2.0), mk(1.0, 2.0), mk(1.0, 2.0)];
         assert!(matches!(
             consensus_price(&entries.iter().collect::<Vec<_>>()),
-            Price::Reliable { method: MatchMethod::Consensus, .. }
+            Price::Reliable {
+                method: MatchMethod::Consensus,
+                ..
+            }
         ));
         // 2 家同价 + 1 家异价（66% ≥ 60%）→ reliable
         let entries = vec![mk(1.0, 2.0), mk(1.0, 2.0), mk(9.0, 9.0)];
@@ -848,7 +925,11 @@ mod tests {
         let entries = vec![mk(1.0, 2.0), no_cost];
         assert!(matches!(
             consensus_price(&entries.iter().collect::<Vec<_>>()),
-            Price::Unreliable { reason: "insufficient-support", support: 1, total: 1 }
+            Price::Unreliable {
+                reason: "insufficient-support",
+                support: 1,
+                total: 1
+            }
         ));
     }
 }
