@@ -43,4 +43,4 @@ pub mod vendor;
 
 /// Vendored pi version this crate's types/tests are written against.
 /// Single source of truth is `vendor/pi/VERSION`; keep both in lockstep.
-pub const PI_VENDOR_VERSION: &str = "1.4.0";
+pub const PI_VENDOR_VERSION: &str = "1.5.2";

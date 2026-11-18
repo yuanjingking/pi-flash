@@ -42,6 +42,16 @@
 - Windows 相关修复利好本仓用户：shell 检测接受 MS Store 别名 + 非 `C:\Windows` 安装下找 PowerShell/WSL（`#9504`/`#9501`）；`mcp.json` 带 UTF-8 BOM 可解析（`#11191`）。
 - pi 侧新键（PF 只读透传，无需动）：classifier `images` 输入、provider `compat.imageInput`/`sendImageOptInHeader`、`MiniMax-M3.1-Flash`、`PI_CODEMODE_MAX_WORKERS`；Copilot 默认模型 `gpt-5.4`→`gpt-6.1-sol`。
 
+## 1.5.2 升级复核（2026-11-18，1.4.0 node_modules 快照 vs npm 1.5.2 dist diff）
+
+- **wire 层零变化（跨 1.5.0/1.5.1/1.5.2 一路）**：`dist/modes/rpc/{rpc-types,jsonl,rpc-client}.js` 与 1.4.0 **逐字节一致**；`core/agent-session.js` 的会话事件字符串集零增删；`AgentSessionEvent` 联合类型无新事件；`prompt`/`steer`/`follow_up` 仍回 `{disposition}`（handled/queued/started）。protocol.rs / catalog.rs 未动。pi-link 218 测试全绿 + `live_rpc_probe --ignored` 真机握手通过（parsed models 152 / get_commands 7 条事件）。
+- `modes/rpc/rpc-mode.js` 改的是**扩展 `ctx.shutdown()` 语义**（PF 不用）：请求进队列后要等「input attach + 无在途命令 + session idle」才退；单 SIGTERM/SIGEOF 在 shutdown 期间不再打断清理，**第二个信号**才硬退（SIGHUP=129 / SIGTERM=143）；`shutdown()` 幂等。PF 侧 `client.rs` 只认「子进程退出」事件，无行为差异。
+- `utils/image-resize.js` 仅 `await worker.terminate()`（#10695，每图 +~15ms）；**`formatDimensionNote` 未变**，PF 的尺寸标注剥除照旧。
+- `core/auth-storage.js` 锁改 `lockfile.lockSync(path)`（去掉 `realpath: false`，符号链接别名共享一把锁 #11655）。PF 不写 auth.json（只经 pi 读写），`registry.rs` 的 `ReadOnlyAuthStorage` 仍导出、行为不变。
+- 1.5.1 起新增的对外面（PF 不用）：`pi auth login/logout`（`cli/auth-login|logout|terminal.js` 新文件）、Claude/Anthropic message threads（`compat.supportsMessageThreads`）、空闲 prompt cache 预热（`cacheWarming: "idle"`，**会花钱**，PF 不改 pi 配置即按用户 `~/.pi` 走）。
+- 破坏性（不破 PF）：grep 的 `GrepOperations.readFile` 不再对 context 行调用；全禁用工具时 OpenAI 兼容请求不再发 `"tools": []`。修复：steering/follow-up 的图片也走 resize、`/reload` 多 overlay 清理、Windows find 反斜杠 pattern。
+- 落地清单：`vendor/pi/package.json` + `VERSION` = `1.5.2`、`pi-link` `PI_VENDOR_VERSION = "1.5.2"`（`vendor.rs` 测试断言两者同步；仍是 `registry-cache.json` 的失效键）。
+
 ## transcript 重放
 
 - 系统提示词与工具声明在 transcript 的 `role:"system"` 消息里（content 追加 + sections 补丁 + toolsAdded/Removed），重放对齐 pi-ai `utils/transcript.js`。
